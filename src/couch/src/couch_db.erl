@@ -43,7 +43,6 @@
     get_epochs/1,
     get_filepath/1,
     get_instance_start_time/1,
-    get_last_purged/1,
     get_pid/1,
     get_revs_limit/1,
     get_security/1,
@@ -51,12 +50,15 @@
     get_user_ctx/1,
     get_uuid/1,
     get_purge_seq/1,
+    get_oldest_purge_seq/1,
+    get_purge_infos_limit/1,
 
     is_db/1,
     is_system_db/1,
     is_clustered/1,
 
     set_revs_limit/2,
+    set_purge_infos_limit/2,
     set_security/2,
     set_user_ctx/2,
 
@@ -75,6 +77,9 @@
     get_full_doc_infos/2,
     get_missing_revs/2,
     get_design_docs/1,
+    get_purge_infos/2,
+
+    get_minimum_purge_seq/1,
 
     update_doc/3,
     update_doc/4,
@@ -84,6 +89,7 @@
     delete_doc/3,
 
     purge_docs/2,
+    purge_docs/3,
 
     with_stream/3,
     open_write_stream/2,
@@ -97,6 +103,8 @@
     fold_changes/4,
     fold_changes/5,
     count_changes_since/2,
+    fold_purge_infos/4,
+    fold_purge_infos/5,
 
     calculate_start_seq/3,
     owner_of/2,
@@ -369,8 +377,132 @@ get_full_doc_info(Db, Id) ->
 get_full_doc_infos(Db, Ids) ->
     couch_db_engine:open_docs(Db, Ids).
 
-purge_docs(#db{main_pid=Pid}, IdsRevs) ->
-    gen_server:call(Pid, {purge_docs, IdsRevs}).
+purge_docs(Db, IdRevs) ->
+    purge_docs(Db, IdRevs, []).
+
+-spec purge_docs(#db{}, [{UUId, Id, [Rev]}], [PurgeOption]) ->
+    {ok, [Reply]} when
+    UUId :: binary(),
+    Id :: binary(),
+    Rev :: {non_neg_integer(), binary()},
+    PurgeOption :: interactive_edit | replicated_changes,
+    Reply :: {ok, []} | {ok, [Rev]}.
+purge_docs(#db{main_pid = Pid} = Db, UUIdsIdsRevs, Options) ->
+    increment_stat(Db, [couchdb, database_purges]),
+    gen_server:call(Pid, {purge_docs, UUIdsIdsRevs, Options}).
+
+-spec get_purge_infos(#db{}, [UUId]) -> [PurgeInfo] when
+    UUId :: binary(),
+    PurgeInfo :: {PurgeSeq, UUId, Id, [Rev]} | not_found,
+    PurgeSeq :: non_neg_integer(),
+    Id :: binary(),
+    Rev :: {non_neg_integer(), binary()}.
+get_purge_infos(Db, UUIDs) ->
+    couch_db_engine:load_purge_infos(Db, UUIDs).
+
+
+get_minimum_purge_seq(#db{} = Db) ->
+    PurgeSeq = couch_db_engine:get_purge_seq(Db),
+    OldestPurgeSeq = couch_db_engine:get_oldest_purge_seq(Db),
+    PurgeInfosLimit = couch_db_engine:get_purge_infos_limit(Db),
+
+    FoldFun = fun(#doc{id = DocId, body = {Props}}, SeqAcc) ->
+        case DocId of
+            <<"_local/purge-", _/binary>> ->
+                ClientSeq = couch_util:get_value(<<"purge_seq">>, Props),
+                case ClientSeq of
+                    CS when is_integer(CS), CS >= PurgeSeq - PurgeInfosLimit ->
+                        {ok, SeqAcc};
+                    CS when is_integer(CS) ->
+                        case purge_client_exists(Db, DocId, Props) of
+                            true -> {ok, erlang:min(CS, SeqAcc)};
+                            false -> {ok, SeqAcc}
+                        end;
+                    _ ->
+                        % If there's a broken doc we have to keep every
+                        % purge info until the doc is fixed or removed.
+                        Fmt = "Invalid purge doc '~s' with purge_seq '~w'",
+                        couch_log:error(Fmt, [DocId, ClientSeq]),
+                        {ok, erlang:min(OldestPurgeSeq, SeqAcc)}
+                end;
+            _ ->
+                {stop, SeqAcc}
+        end
+    end,
+    InitMinSeq = PurgeSeq - PurgeInfosLimit,
+    Opts = [
+        {start_key, list_to_binary(?LOCAL_DOC_PREFIX ++ "purge-")}
+    ],
+    {ok, MinIdxSeq} = couch_db:fold_local_docs(Db, FoldFun, InitMinSeq, Opts),
+    FinalSeq = case MinIdxSeq < PurgeSeq - PurgeInfosLimit of
+        true -> MinIdxSeq;
+        false -> erlang:max(0, PurgeSeq - PurgeInfosLimit)
+    end,
+    % Log a warning if we've got a purge sequence exceeding the
+    % configured threshold.
+    if FinalSeq >= (PurgeSeq - PurgeInfosLimit) -> ok; true ->
+        Fmt = "The purge sequence for '~s' exceeds configured threshold",
+        couch_log:warning(Fmt, [couch_db:name(Db)])
+    end,
+    FinalSeq.
+
+
+purge_client_exists(DbName, DocId, Props) ->
+    % Warn about clients that have not updated their purge
+    % checkpoints in the last "index_lag_warn_seconds"
+    LagWindow = config:get_integer(
+            "purge", "index_lag_warn_seconds", 86400), % Default 24 hours
+
+    {Mega, Secs, _} = os:timestamp(),
+    NowSecs = Mega * 1000000 + Secs,
+    LagThreshold = NowSecs - LagWindow,
+
+    try
+        CheckFun = get_purge_client_fun(DocId, Props),
+        Exists = CheckFun(DbName, DocId, Props),
+        if not Exists -> ok; true ->
+            Updated = couch_util:get_value(<<"updated_on">>, Props),
+            if is_integer(Updated) and Updated > LagThreshold -> ok; true ->
+                Diff = NowSecs - Updated,
+                Fmt = "Purge checkpint '~s' not updated in ~p seconds",
+                couch_log:error(Fmt, [DocId, Diff])
+            end
+        end,
+        Exists
+    catch _:_ ->
+        % If we fail to check for a client we have to assume that
+        % it exists.
+        true
+    end.
+
+
+get_purge_client_fun(DocId, Props) ->
+    M0 = couch_util:get_value(<<"verify_module">>, Props),
+    M = try
+        binary_to_existing_atom(M0, latin1)
+    catch error:badarg ->
+        Fmt1 = "Missing index module '~s' for purge checkpoint '~s'",
+        couch_log:error(Fmt1, [M0, DocId]),
+        throw(failed)
+    end,
+
+    F0 = couch_util:get_value(<<"verify_function">>, Props),
+    try
+        F = binary_to_existing_atom(F0, latin1),
+        fun M:F/2
+    catch error:badarg ->
+        Fmt2 = "Missing function '~s' in '~s' for purge checkpoint '~s'",
+        couch_log:error(Fmt2, [F0, M0, DocId]),
+        throw(failed)
+    end.
+
+
+set_purge_infos_limit(#db{main_pid=Pid}=Db, Limit) when Limit > 0 ->
+    check_is_admin(Db),
+    gen_server:call(Pid, {set_purge_infos_limit, Limit}, infinity);
+set_purge_infos_limit(_Db, _Limit) ->
+    throw(invalid_purge_infos_limit).
+
 
 get_after_doc_read_fun(#db{after_doc_read = Fun}) ->
     Fun.
@@ -392,8 +524,11 @@ get_user_ctx(?OLD_DB_REC = Db) ->
 get_purge_seq(#db{}=Db) ->
     {ok, couch_db_engine:get_purge_seq(Db)}.
 
-get_last_purged(#db{}=Db) ->
-    {ok, couch_db_engine:get_last_purged(Db)}.
+get_oldest_purge_seq(#db{}=Db) ->
+    {ok, couch_db_engine:get_oldest_purge_seq(Db)}.
+
+get_purge_infos_limit(#db{}=Db) ->
+    couch_db_engine:get_purge_infos_limit(Db).
 
 get_pid(#db{main_pid = Pid}) ->
     Pid.
@@ -1404,6 +1539,14 @@ fold_changes(Db, StartSeq, UserFun, UserAcc) ->
 
 fold_changes(Db, StartSeq, UserFun, UserAcc, Opts) ->
     couch_db_engine:fold_changes(Db, StartSeq, UserFun, UserAcc, Opts).
+
+
+fold_purge_infos(Db, StartPurgeSeq, Fun, Acc) ->
+    fold_purge_infos(Db, StartPurgeSeq, Fun, Acc, []).
+
+
+fold_purge_infos(Db, StartPurgeSeq, UFun, UAcc, Opts) ->
+    couch_db_engine:fold_purge_infos(Db, StartPurgeSeq, UFun, UAcc, Opts).
 
 
 count_changes_since(Db, SinceSeq) ->
