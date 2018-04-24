@@ -15,9 +15,11 @@
 
 -export([get/2]).
 -export([init/2, open/2, close/1, reset/1, delete/1, shutdown/1]).
--export([start_update/3, purge/4, process_doc/3, finish_update/1, commit/1]).
+-export([start_update/4, purge/4, process_doc/3, finish_update/1, commit/1]).
 -export([compact/3, swap_compacted/2, remove_compacted/1]).
 -export([index_file_exists/1]).
+-export([update_local_purge_doc/2, verify_index_exists/1]).
+-export([maybe_create_local_purge_doc/2]).
 
 -include_lib("couch/include/couch_db.hrl").
 -include_lib("couch_mrview/include/couch_mrview.hrl").
@@ -121,14 +123,17 @@ open(Db, State) ->
                 {ok, {OldSig, Header}} ->
                     % Matching view signatures.
                     NewSt = couch_mrview_util:init_state(Db, Fd, State, Header),
+                    maybe_create_local_purge_doc(Db, NewSt),
                     {ok, NewSt};
                 % end of upgrade code for <= 1.2.x
                 {ok, {Sig, Header}} ->
                     % Matching view signatures.
                     NewSt = couch_mrview_util:init_state(Db, Fd, State, Header),
+                    maybe_create_local_purge_doc(Db, NewSt),
                     {ok, NewSt};
                 _ ->
                     NewSt = couch_mrview_util:reset_index(Db, Fd, State),
+                    maybe_create_local_purge_doc(Db, NewSt),
                     {ok, NewSt}
             end;
         {error, Reason} = Error ->
@@ -167,8 +172,13 @@ reset(State) ->
     end).
 
 
-start_update(PartialDest, State, NumChanges) ->
-    couch_mrview_updater:start_update(PartialDest, State, NumChanges).
+start_update(PartialDest, State, NumChanges, NumChangesDone) ->
+    couch_mrview_updater:start_update(
+        PartialDest,
+        State,
+        NumChanges,
+        NumChangesDone
+    ).
 
 
 purge(Db, PurgeSeq, PurgedIdRevs, State) ->
@@ -207,3 +217,120 @@ index_file_exists(State) ->
     } = State,
     IndexFName = couch_mrview_util:index_file(DbName, Sig),
     filelib:is_file(IndexFName).
+
+
+verify_index_exists(Options) ->
+    ShardDbName = couch_mrview_util:get_value_from_options(
+        <<"dbname">>,
+        Options
+    ),
+    DDocId = couch_mrview_util:get_value_from_options(
+        <<"ddoc_id">>,
+        Options
+    ),
+    SigInLocal = couch_mrview_util:get_value_from_options(
+        <<"signature">>,
+        Options
+    ),
+    case couch_db:open_int(ShardDbName, []) of
+        {ok, Db} ->
+            try
+                DbName = mem3:dbname(couch_db:name(Db)),
+                case ddoc_cache:open(DbName, DDocId) of
+                    {ok, DDoc} ->
+                        {ok, IdxState} = couch_mrview_util:ddoc_to_mrst(
+                            ShardDbName,
+                            DDoc
+                        ),
+                        IdxSig = IdxState#mrst.sig,
+                        couch_index_util:hexsig(IdxSig) == SigInLocal;
+                    _Else ->
+                        false
+                end
+            catch E:T ->
+                Stack = erlang:get_stacktrace(),
+                couch_log:error(
+                    "Error occurs when verifying existence of ~s/~s :: ~p ~p",
+                    [ShardDbName, DDocId, {E, T}, Stack]
+                ),
+                false
+            after
+                catch couch_db:close(Db)
+            end;
+        _ ->
+            false
+    end.
+
+
+maybe_create_local_purge_doc(Db, #mrst{}=State) ->
+    Sig = couch_index_util:hexsig(get(signature, State)),
+    LocalPurgeDocId = couch_mrview_util:get_local_purge_doc_id(Sig),
+    case couch_db:open_doc(Db, LocalPurgeDocId, []) of
+        {not_found, _Reason} ->
+            update_local_purge_doc(Db, State);
+        {ok, _LocalPurgeDoc} ->
+            ok
+    end;
+maybe_create_local_purge_doc(DbName, #doc{}=DDoc) ->
+    {ok, Db} = case couch_db:open_int(DbName, []) of
+        {ok, _} = Resp -> Resp;
+        Else -> exit(Else)
+    end,
+    try
+        {ok, DefaultPurgeSeq} = couch_db:get_purge_seq(Db),
+        case get_index_type(DDoc, <<"views">>) of true ->
+            try couch_mrview_util:ddoc_to_mrst(DbName, DDoc) of
+                {ok, MRSt} -> update_local_purge_doc(Db, MRSt, DefaultPurgeSeq)
+            catch _:_ ->
+                ok
+            end;
+        false ->
+            ok
+        end
+    catch E:T ->
+        Stack = erlang:get_stacktrace(),
+        couch_log:error(
+            "Error occurs when creating local purge document ~p ~p",
+            [{E, T}, Stack]
+        )
+    after
+        catch couch_db:close(Db)
+    end.
+
+
+update_local_purge_doc(Db, State) ->
+    update_local_purge_doc(Db, State, get(purge_seq, State)).
+
+
+update_local_purge_doc(Db, State, PSeq) ->
+    Sig = couch_index_util:hexsig(State#mrst.sig),
+    DocId = couch_mrview_util:get_local_purge_doc_id(Sig),
+    {Mega, Secs, _} = os:timestamp(),
+    NowSecs = Mega * 1000000 + Secs,
+    BaseDoc = couch_doc:from_json_obj({[
+        {<<"_id">>, DocId},
+        {<<"type">>, <<"mrview">>},
+        {<<"purge_seq">>, PSeq},
+        {<<"updated_on">>, NowSecs},
+        {<<"verify_module">>, <<"couch_mrview_index">>},
+        {<<"verify_function">>, <<"verify_index_exists">>},
+        {<<"verify_options">>, {[
+            {<<"dbname">>, get(db_name, State)},
+            {<<"ddoc_id">>, get(idx_name, State)},
+            {<<"signature">>, Sig}
+        ]}}
+    ]}),
+    Doc = case couch_db:open_doc(Db, DocId, []) of
+        {ok, #doc{revs = Revs}} ->
+            BaseDoc#doc{revs = Revs};
+        {not_found, _} ->
+            BaseDoc
+    end,
+    couch_db:update_doc(Db, Doc, []).
+
+
+get_index_type(#doc{body={Props}}, IndexType) ->
+    case couch_util:get_value(IndexType, Props) of
+        undefined -> false;
+        _ -> true
+    end.
