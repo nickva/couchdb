@@ -29,6 +29,8 @@ cet_default_props() ->
     ?assertEqual(true, is_integer(couch_db_engine:get_disk_version(Db))),
     ?assertEqual(0, couch_db_engine:get_update_seq(Db)),
     ?assertEqual(0, couch_db_engine:get_purge_seq(Db)),
+    ?assertEqual(true, is_integer(couch_db_engine:get_purge_infos_limit(Db))),
+    ?assertEqual(true, couch_db_engine:get_purge_infos_limit(Db) > 0),
     ?assertEqual([], couch_db_engine:get_last_purged(Db)),
     ?assertEqual([], couch_db_engine:get_security(Db)),
     ?assertEqual(1000, couch_db_engine:get_revs_limit(Db)),

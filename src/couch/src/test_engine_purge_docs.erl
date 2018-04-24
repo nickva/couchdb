@@ -25,12 +25,14 @@ cet_purge_simple() ->
         {create, {<<"foo">>, {[{<<"vsn">>, 1}]}}}
     ],
     {ok, Db2} = test_engine_util:apply_actions(Db1, Actions1),
+    {ok, PIdRevs2} = couch_db_engine:fold_purge_infos(
+            Db2, 0, fun fold_fun/2, [], []),
 
     ?assertEqual(1, couch_db_engine:get_doc_count(Db2)),
     ?assertEqual(0, couch_db_engine:get_del_doc_count(Db2)),
     ?assertEqual(1, couch_db_engine:get_update_seq(Db2)),
     ?assertEqual(0, couch_db_engine:get_purge_seq(Db2)),
-    ?assertEqual([], couch_db_engine:get_last_purged(Db2)),
+    ?assertEqual([], PIdRevs2),
 
     [FDI] = couch_db_engine:open_docs(Db2, [<<"foo">>]),
     PrevRev = test_engine_util:prev_rev(FDI),
@@ -40,12 +42,14 @@ cet_purge_simple() ->
         {purge, {<<"foo">>, Rev}}
     ],
     {ok, Db3} = test_engine_util:apply_actions(Db2, Actions2),
+    {ok, PIdRevs3} = couch_db_engine:fold_purge_infos(
+            Db3, 0, fun fold_fun/2, [], []),
 
     ?assertEqual(0, couch_db_engine:get_doc_count(Db3)),
     ?assertEqual(0, couch_db_engine:get_del_doc_count(Db3)),
     ?assertEqual(2, couch_db_engine:get_update_seq(Db3)),
     ?assertEqual(1, couch_db_engine:get_purge_seq(Db3)),
-    ?assertEqual([{<<"foo">>, [Rev]}], couch_db_engine:get_last_purged(Db3)).
+    ?assertEqual([{<<"foo">>, [Rev]}], PIdRevs3).
 
 
 cet_purge_conflicts() ->
@@ -56,12 +60,14 @@ cet_purge_conflicts() ->
         {conflict, {<<"foo">>, {[{<<"vsn">>, 2}]}}}
     ],
     {ok, Db2} = test_engine_util:apply_actions(Db1, Actions1),
+    {ok, PIdRevs2} = couch_db_engine:fold_purge_infos(
+            Db2, 0, fun fold_fun/2, [], []),
 
     ?assertEqual(1, couch_db_engine:get_doc_count(Db2)),
     ?assertEqual(0, couch_db_engine:get_del_doc_count(Db2)),
     ?assertEqual(2, couch_db_engine:get_update_seq(Db2)),
     ?assertEqual(0, couch_db_engine:get_purge_seq(Db2)),
-    ?assertEqual([], couch_db_engine:get_last_purged(Db2)),
+    ?assertEqual([], PIdRevs2),
 
     [FDI1] = couch_db_engine:open_docs(Db2, [<<"foo">>]),
     PrevRev1 = test_engine_util:prev_rev(FDI1),
@@ -71,12 +77,14 @@ cet_purge_conflicts() ->
         {purge, {<<"foo">>, Rev1}}
     ],
     {ok, Db3} = test_engine_util:apply_actions(Db2, Actions2),
+    {ok, PIdRevs3} = couch_db_engine:fold_purge_infos(
+            Db3, 0, fun fold_fun/2, [], []),
 
     ?assertEqual(1, couch_db_engine:get_doc_count(Db3)),
     ?assertEqual(0, couch_db_engine:get_del_doc_count(Db3)),
     ?assertEqual(4, couch_db_engine:get_update_seq(Db3)),
     ?assertEqual(1, couch_db_engine:get_purge_seq(Db3)),
-    ?assertEqual([{<<"foo">>, [Rev1]}], couch_db_engine:get_last_purged(Db3)),
+    ?assertEqual([{<<"foo">>, [Rev1]}], PIdRevs3),
 
     [FDI2] = couch_db_engine:open_docs(Db3, [<<"foo">>]),
     PrevRev2 = test_engine_util:prev_rev(FDI2),
@@ -86,12 +94,14 @@ cet_purge_conflicts() ->
         {purge, {<<"foo">>, Rev2}}
     ],
     {ok, Db4} = test_engine_util:apply_actions(Db3, Actions3),
+    {ok, PIdRevs4} = couch_db_engine:fold_purge_infos(
+            Db4, 0, fun fold_fun/2, [], []),
 
     ?assertEqual(0, couch_db_engine:get_doc_count(Db4)),
     ?assertEqual(0, couch_db_engine:get_del_doc_count(Db4)),
     ?assertEqual(5, couch_db_engine:get_update_seq(Db4)),
     ?assertEqual(2, couch_db_engine:get_purge_seq(Db4)),
-    ?assertEqual([{<<"foo">>, [Rev2]}], couch_db_engine:get_last_purged(Db4)).
+    ?assertEqual([{<<"foo">>, [Rev2]}, {<<"foo">>, [Rev1]}], PIdRevs4).
 
 
 cet_add_delete_purge() ->
@@ -103,12 +113,14 @@ cet_add_delete_purge() ->
     ],
 
     {ok, Db2} = test_engine_util:apply_actions(Db1, Actions1),
+    {ok, PIdRevs2} = couch_db_engine:fold_purge_infos(
+            Db2, 0, fun fold_fun/2, [], []),
 
     ?assertEqual(0, couch_db_engine:get_doc_count(Db2)),
     ?assertEqual(1, couch_db_engine:get_del_doc_count(Db2)),
     ?assertEqual(2, couch_db_engine:get_update_seq(Db2)),
     ?assertEqual(0, couch_db_engine:get_purge_seq(Db2)),
-    ?assertEqual([], couch_db_engine:get_last_purged(Db2)),
+    ?assertEqual([], PIdRevs2),
 
     [FDI] = couch_db_engine:open_docs(Db2, [<<"foo">>]),
     PrevRev = test_engine_util:prev_rev(FDI),
@@ -118,12 +130,14 @@ cet_add_delete_purge() ->
         {purge, {<<"foo">>, Rev}}
     ],
     {ok, Db3} = test_engine_util:apply_actions(Db2, Actions2),
+    {ok, PIdRevs3} = couch_db_engine:fold_purge_infos(
+            Db3, 0, fun fold_fun/2, [], []),
 
     ?assertEqual(0, couch_db_engine:get_doc_count(Db3)),
     ?assertEqual(0, couch_db_engine:get_del_doc_count(Db3)),
     ?assertEqual(3, couch_db_engine:get_update_seq(Db3)),
     ?assertEqual(1, couch_db_engine:get_purge_seq(Db3)),
-    ?assertEqual([{<<"foo">>, [Rev]}], couch_db_engine:get_last_purged(Db3)).
+    ?assertEqual([{<<"foo">>, [Rev]}], PIdRevs3).
 
 
 cet_add_two_purge_one() ->
@@ -135,12 +149,14 @@ cet_add_two_purge_one() ->
     ],
 
     {ok, Db2} = test_engine_util:apply_actions(Db1, Actions1),
+    {ok, PIdRevs2} = couch_db_engine:fold_purge_infos(
+            Db2, 0, fun fold_fun/2, [], []),
 
     ?assertEqual(2, couch_db_engine:get_doc_count(Db2)),
     ?assertEqual(0, couch_db_engine:get_del_doc_count(Db2)),
     ?assertEqual(2, couch_db_engine:get_update_seq(Db2)),
     ?assertEqual(0, couch_db_engine:get_purge_seq(Db2)),
-    ?assertEqual([], couch_db_engine:get_last_purged(Db2)),
+    ?assertEqual([], PIdRevs2),
 
     [FDI] = couch_db_engine:open_docs(Db2, [<<"foo">>]),
     PrevRev = test_engine_util:prev_rev(FDI),
@@ -150,9 +166,15 @@ cet_add_two_purge_one() ->
         {purge, {<<"foo">>, Rev}}
     ],
     {ok, Db3} = test_engine_util:apply_actions(Db2, Actions2),
+    {ok, PIdRevs3} = couch_db_engine:fold_purge_infos(
+            Db3, 0, fun fold_fun/2, [], []),
 
     ?assertEqual(1, couch_db_engine:get_doc_count(Db3)),
     ?assertEqual(0, couch_db_engine:get_del_doc_count(Db3)),
     ?assertEqual(3, couch_db_engine:get_update_seq(Db3)),
     ?assertEqual(1, couch_db_engine:get_purge_seq(Db3)),
-    ?assertEqual([{<<"foo">>, [Rev]}], couch_db_engine:get_last_purged(Db3)).
+    ?assertEqual([{<<"foo">>, [Rev]}], PIdRevs3).
+
+
+fold_fun({_Pseq, _UUID, Id, Revs}, Acc) ->
+    {ok, [{Id, Revs} | Acc]}.

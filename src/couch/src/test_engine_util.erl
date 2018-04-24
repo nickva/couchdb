@@ -24,6 +24,7 @@
     test_engine_attachments,
     test_engine_fold_docs,
     test_engine_fold_changes,
+    test_engine_fold_purge_infos,
     test_engine_purge_docs,
     test_engine_compaction,
     test_engine_ref_counting
@@ -322,7 +323,8 @@ db_as_term(Db) ->
         {props, db_props_as_term(Db)},
         {docs, db_docs_as_term(Db)},
         {local_docs, db_local_docs_as_term(Db)},
-        {changes, db_changes_as_term(Db)}
+        {changes, db_changes_as_term(Db)},
+        {purged_docs, db_purged_docs_as_term(Db)}
     ].
 
 
@@ -333,7 +335,7 @@ db_props_as_term(Db) ->
         get_disk_version,
         get_update_seq,
         get_purge_seq,
-        get_last_purged,
+        get_purge_infos_limit,
         get_security,
         get_revs_limit,
         get_uuid,
@@ -364,6 +366,15 @@ db_changes_as_term(Db) ->
     lists:reverse(lists:map(fun(FDI) ->
         fdi_to_term(Db, FDI)
     end, Changes)).
+
+
+db_purged_docs_as_term(Db) ->
+    PSeq = couch_db_engine:get_oldest_purge_seq(Db) - 1,
+    FoldFun = fun({PSeq, UUID, Id, Revs}, Acc) ->
+        {ok, [{PSeq, UUID, Id, Revs} | Acc]}
+    end,
+    {ok, PDocs} = couch_db_engine:fold_purge_infos(Db, PSeq, FoldFun, [], []),
+    lists:reverse(PDocs).
 
 
 fdi_to_term(Db, FDI) ->
@@ -494,8 +505,8 @@ compact(Db) ->
             ok;
         {'DOWN', Ref, _, _, Reason} ->
             erlang:error({compactor_died, Reason})
-        after ?COMPACTOR_TIMEOUT ->
-            erlang:error(compactor_timed_out)
+    after ?COMPACTOR_TIMEOUT ->
+        erlang:error(compactor_timed_out)
     end,
 
     test_util:wait(fun() ->
