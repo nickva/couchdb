@@ -16,6 +16,7 @@
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("couch/include/couch_db.hrl").
+-include("couch_bt_engine.hrl").
 
 
 cet_purge_simple() ->
@@ -50,6 +51,47 @@ cet_purge_simple() ->
     ?assertEqual(2, couch_db_engine:get_update_seq(Db3)),
     ?assertEqual(1, couch_db_engine:get_purge_seq(Db3)),
     ?assertEqual([{<<"foo">>, [Rev]}], PIdRevs3).
+
+
+cet_purge_UUID() ->
+    {ok, Engine, St1} = test_engine_util:init_engine(),
+
+    Actions1 = [
+        {create, {<<"foo">>, [{<<"vsn">>, 1}]}}
+    ],
+    {ok, St2} = test_engine_util:apply_actions(Engine, St1, Actions1),
+    {ok, PIdRevs2} = Engine:fold_purge_infos(St2, 0, fun fold_fun/2, [], []),
+
+    ?assertEqual(1, Engine:get_doc_count(St2)),
+    ?assertEqual(0, Engine:get_del_doc_count(St2)),
+    ?assertEqual(1, Engine:get_update_seq(St2)),
+    ?assertEqual(0, Engine:get_purge_seq(St2)),
+    ?assertEqual([], PIdRevs2),
+
+    [FDI] = Engine:open_docs(St2, [<<"foo">>]),
+    PrevRev = test_engine_util:prev_rev(FDI),
+    Rev = PrevRev#rev_info.rev,
+
+    Actions2 = [
+        {purge, {<<"foo">>, Rev}}
+    ],
+    {ok, St3} = test_engine_util:apply_actions(Engine, St2, Actions2),
+    {ok, _PIdRevs3} = Engine:fold_purge_infos(St3, 0, fun fold_fun/2, [], []),
+
+    ?assertEqual(0, Engine:get_doc_count(St3)),
+    ?assertEqual(0, Engine:get_del_doc_count(St3)),
+    ?assertEqual(2, Engine:get_update_seq(St3)),
+    ?assertEqual(1, Engine:get_purge_seq(St3)),
+
+    PurgeSeqTree = St3#st.purge_seq_tree,
+
+    Fun = fun({PurgeSeq, UUID, _, _}, _Reds, _Acc) ->
+        {stop, {PurgeSeq, UUID}}
+     end,
+    {ok, _, {_, UUID}} = couch_btree:fold(
+        PurgeSeqTree, Fun, 0, [{dir, rev}]
+    ),
+    ?assert(is_binary(UUID)).
 
 
 cet_purge_conflicts() ->
