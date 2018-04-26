@@ -104,7 +104,7 @@ cet_compact_with_everything() ->
         {<<"foo">>, [FooRev#rev_info.rev]}
     ],
 
-    {ok, PIdRevs4} = couch_db_enigne:fold_purge_infos(
+    {ok, PIdRevs4} = couch_db_engine:fold_purge_infos(
             Db4, 0, fun fold_fun/2, [], []),
     ?assertEqual(PurgedIdRevs, PIdRevs4),
 
@@ -177,180 +177,131 @@ cet_recompact_updates() ->
 
 
 cet_purge_during_compact() ->
-    {ok, Engine, Path, St1} = test_engine_util:init_engine(dbpath),
+    {ok, Db1} = test_engine_util:create_db(),
 
-    Actions1 = [
-        {create, {<<"foo">>, []}},
-        {create, {<<"bar">>, []}},
-        {conflict, {<<"bar">>, [{<<"vsn">>, 2}]}},
-        {create, {<<"baz">>, []}}
+    Actions1 = lists:map(fun(Seq) ->
+        {create, {docid(Seq), {[{<<"int">>, Seq}]}}}
+    end, lists:seq(1, 1000)),
+    Actions2 = [
+        {create, {<<"foo">>, {[]}}},
+        {create, {<<"bar">>, {[]}}},
+        {create, {<<"baz">>, {[]}}}
     ],
+    {ok, Db2} = test_engine_util:apply_batch(Db1, Actions1 ++ Actions2),
+    Actions3 = [
+        {conflict, {<<"bar">>, {[{<<"vsn">>, 2}]}}}
+    ],
+    {ok, Db3} = test_engine_util:apply_actions(Db2, Actions3),
 
-    {ok, St2} = test_engine_util:apply_actions(Engine, St1, Actions1),
-    {ok, St3, DbName, _, Term} = test_engine_util:compact(Engine, St2, Path),
+    {ok, Pid} = couch_db:start_compact(Db3),
+    catch erlang:suspend_process(Pid),
 
-    [BarFDI, BazFDI] = Engine:open_docs(St3, [<<"bar">>, <<"baz">>]),
+    [BarFDI, BazFDI] = couch_db_engine:open_docs(Db3, [<<"bar">>, <<"baz">>]),
     BarRev = test_engine_util:prev_rev(BarFDI),
     BazRev = test_engine_util:prev_rev(BazFDI),
-    Actions2 = [
+    Actions4 = [
         {purge, {<<"bar">>, BarRev#rev_info.rev}},
         {purge, {<<"baz">>, BazRev#rev_info.rev}}
     ],
-    {ok, St4} = test_engine_util:apply_actions(Engine, St3, Actions2),
-    Db1 = test_engine_util:db_as_term(Engine, St4),
 
-    {ok, St5, NewPid} = Engine:finish_compaction(St4, DbName, [], Term),
+    {ok, Db4} = test_engine_util:apply_actions(Db3, Actions4),
+    Term1 = test_engine_util:db_as_term(Db4),
 
-    ?assertEqual(true, is_pid(NewPid)),
-    Ref = erlang:monitor(process, NewPid),
+    catch erlang:resume_process(Pid),
+    test_engine_util:compact(Db4),
 
-    NewTerm = receive
-        {'$gen_cast', {compact_done, Engine, Term0}} ->
-            Term0;
-        {'DOWN', Ref, _, _, Reason} ->
-            erlang:error({compactor_died, Reason})
-        after 10000 ->
-            erlang:error(compactor_timed_out)
-    end,
+    {ok, Db5} = couch_db:reopen(Db4),
+    Term2 = test_engine_util:db_as_term(Db5),
 
-    {ok, St6, undefined} = Engine:finish_compaction(St5, DbName, [], NewTerm),
-    Db2 = test_engine_util:db_as_term(Engine, St6),
-    Diff = test_engine_util:term_diff(Db1, Db2),
+    Diff = test_engine_util:term_diff(Term1, Term2),
     ?assertEqual(nodiff, Diff).
 
 
 cet_multiple_purge_during_compact() ->
-    {ok, Engine, Path, St1} = test_engine_util:init_engine(dbpath),
+    {ok, Db1} = test_engine_util:create_db(),
 
-    Actions1 = [
-        {create, {<<"foo">>, []}},
-        {create, {<<"bar">>, []}},
-        {conflict, {<<"bar">>, [{<<"vsn">>, 2}]}},
-        {create, {<<"baz">>, []}}
-    ],
-
-    {ok, St2} = test_engine_util:apply_actions(Engine, St1, Actions1),
-    {ok, St3, DbName, _, Term} = test_engine_util:compact(Engine, St2, Path),
-
-    [BarFDI, BazFDI] = Engine:open_docs(St3, [<<"bar">>, <<"baz">>]),
-    BarRev = test_engine_util:prev_rev(BarFDI),
+    Actions1 = lists:map(fun(Seq) ->
+        {create, {docid(Seq), {[{<<"int">>, Seq}]}}}
+    end, lists:seq(1, 1000)),
     Actions2 = [
+        {create, {<<"foo">>, {[]}}},
+        {create, {<<"bar">>, {[]}}},
+        {create, {<<"baz">>, {[]}}}
+    ],
+    {ok, Db2} = test_engine_util:apply_batch(Db1, Actions1 ++ Actions2),
+
+    Actions3 = [
+        {conflict, {<<"bar">>, {[{<<"vsn">>, 2}]}}}
+    ],
+    {ok, Db3} = test_engine_util:apply_actions(Db2, Actions3),
+
+
+    {ok, Pid} = couch_db:start_compact(Db3),
+    catch erlang:suspend_process(Pid),
+
+    [BarFDI, BazFDI] = couch_db_engine:open_docs(Db3, [<<"bar">>, <<"baz">>]),
+    BarRev = test_engine_util:prev_rev(BarFDI),
+    Actions4 = [
         {purge, {<<"bar">>, BarRev#rev_info.rev}}
     ],
-    {ok, St4} = test_engine_util:apply_actions(Engine, St3, Actions2),
+    {ok, Db4} = test_engine_util:apply_actions(Db3, Actions4),
 
     BazRev = test_engine_util:prev_rev(BazFDI),
-    Actions3 = [
+    Actions5 = [
         {purge, {<<"baz">>, BazRev#rev_info.rev}}
     ],
-    {ok, St5} = test_engine_util:apply_actions(Engine, St4, Actions3),
 
-    Db1 = test_engine_util:db_as_term(Engine, St5),
-    {ok, St6, NewPid} = Engine:finish_compaction(St5, DbName, [], Term),
+    {ok, Db5} = test_engine_util:apply_actions(Db4, Actions5),
+    Term1 = test_engine_util:db_as_term(Db5),
 
-    ?assertEqual(true, is_pid(NewPid)),
-    Ref = erlang:monitor(process, NewPid),
+    catch erlang:resume_process(Pid),
+    test_engine_util:compact(Db5),
 
-    NewTerm = receive
-        {'$gen_cast', {compact_done, Engine, Term0}} ->
-            Term0;
-        {'DOWN', Ref, _, _, Reason} ->
-            erlang:error({compactor_died, Reason})
-        after 10000 ->
-            erlang:error(compactor_timed_out)
-    end,
+    {ok, Db6} = couch_db:reopen(Db5),
+    Term2 = test_engine_util:db_as_term(Db6),
 
-    {ok, St7, undefined} = Engine:finish_compaction(St6, DbName, [], NewTerm),
-    Db2 = test_engine_util:db_as_term(Engine, St7),
-    Diff = test_engine_util:term_diff(Db1, Db2),
+    Diff = test_engine_util:term_diff(Term1, Term2),
     ?assertEqual(nodiff, Diff).
 
 
-cet_recompact_purge() ->
-    {ok, Engine, Path, St1} = test_engine_util:init_engine(dbpath),
-
-    Actions1 = [
-        {create, {<<"foo">>, []}},
-        {create, {<<"bar">>, []}},
-        {conflict, {<<"bar">>, [{<<"vsn">>, 2}]}},
-        {create, {<<"baz">>, []}}
-    ],
-
-    {ok, St2} = test_engine_util:apply_actions(Engine, St1, Actions1),
-    {ok, St3, DbName, _, Term} = test_engine_util:compact(Engine, St2, Path),
-
-    [BarFDI, BazFDI] = Engine:open_docs(St3, [<<"bar">>, <<"baz">>]),
-    BarRev = test_engine_util:prev_rev(BarFDI),
-    BazRev = test_engine_util:prev_rev(BazFDI),
-    Actions2 = [
-        {purge, {<<"bar">>, BarRev#rev_info.rev}},
-        {purge, {<<"baz">>, BazRev#rev_info.rev}}
-    ],
-    {ok, St4} = test_engine_util:apply_actions(Engine, St3, Actions2),
-    Db1 = test_engine_util:db_as_term(Engine, St4),
-
-    {ok, St5, NewPid} = Engine:finish_compaction(St4, DbName, [], Term),
-
-    ?assertEqual(true, is_pid(NewPid)),
-    Ref = erlang:monitor(process, NewPid),
-
-    NewTerm = receive
-        {'$gen_cast', {compact_done, Engine, Term0}} ->
-            Term0;
-        {'DOWN', Ref, _, _, Reason} ->
-            erlang:error({compactor_died, Reason})
-    after 10000 ->
-        erlang:error(compactor_timed_out)
-    end,
-
-    {ok, St6, undefined} = Engine:finish_compaction(St5, DbName, [], NewTerm),
-    Db2 = test_engine_util:db_as_term(Engine, St6),
-    Diff = test_engine_util:term_diff(Db1, Db2),
-    ?assertEqual(nodiff, Diff).
-
-
-% temporary ignoring this test as it times out
-ignore_cet_compact_purged_docs_limit() ->
-    {ok, Engine, Path, St1} = test_engine_util:init_engine(dbpath),
-    % create NumDocs docs
+cet_compact_purged_docs_limit() ->
+    {ok, Db1} = test_engine_util:create_db(),
     NumDocs = 1200,
     {RActions, RIds} = lists:foldl(fun(Id, {CActions, CIds}) ->
         Id1 = docid(Id),
-        Action = {create, {Id1, [{<<"int">>, Id}]}},
+        Action = {create, {Id1, {[{<<"int">>, Id}]}}},
         {[Action| CActions], [Id1| CIds]}
     end, {[], []}, lists:seq(1, NumDocs)),
     Ids = lists:reverse(RIds),
-    {ok, St2} = test_engine_util:apply_actions(Engine, St1,
-        lists:reverse(RActions)),
+    {ok, Db2} = test_engine_util:apply_batch(Db1, lists:reverse(RActions)),
 
-    % purge NumDocs docs
-    FDIs = Engine:open_docs(St2, Ids),
-    RevActions2 = lists:foldl(fun(FDI, CActions) ->
+    FDIs = couch_db_engine:open_docs(Db2, Ids),
+    RActions2 = lists:foldl(fun(FDI, CActions) ->
         Id = FDI#full_doc_info.id,
         PrevRev = test_engine_util:prev_rev(FDI),
         Rev = PrevRev#rev_info.rev,
         [{purge, {Id, Rev}}| CActions]
     end, [], FDIs),
-    {ok, St3} = test_engine_util:apply_actions(Engine, St2,
-        lists:reverse(RevActions2)),
+    {ok, Db3} = test_engine_util:apply_batch(Db2, lists:reverse(RActions2)),
 
     % check that before compaction all NumDocs of purge_requests
     % are in purge_tree,
     % even if NumDocs=1200 is greater than purged_docs_limit=1000
-    {ok, PurgedIdRevs} = Engine:fold_purge_infos(St3, 0, fun fold_fun/2, [], []),
-    ?assertEqual(1, Engine:get_oldest_purge_seq(St3)),
+    {ok, PurgedIdRevs} = couch_db_engine:fold_purge_infos(
+            Db3, 0, fun fold_fun/2, [], []),
+    ?assertEqual(1, couch_db_engine:get_oldest_purge_seq(Db3)),
     ?assertEqual(NumDocs, length(PurgedIdRevs)),
 
     % compact db
-    {ok, St4, DbName, _, Term} = test_engine_util:compact(Engine, St3, Path),
-    {ok, St5, undefined} = Engine:finish_compaction(St4, DbName, [], Term),
+    test_engine_util:compact(Db3),
+    {ok, Db4} = couch_db:reopen(Db3),
 
     % check that after compaction only purged_docs_limit purge_requests
     % are in purge_tree
-    PurgedDocsLimit = Engine:get_purge_infos_limit(St5),
-    OldestPSeq = Engine:get_oldest_purge_seq(St5),
-    {ok, PurgedIdRevs2} = Engine:fold_purge_infos(
-        St5, OldestPSeq - 1, fun fold_fun/2, [], []),
+    PurgedDocsLimit = couch_db_engine:get_purge_infos_limit(Db4),
+    OldestPSeq = couch_db_engine:get_oldest_purge_seq(Db4),
+    {ok, PurgedIdRevs2} = couch_db_engine:fold_purge_infos(
+        Db4, OldestPSeq - 1, fun fold_fun/2, [], []),
     ExpectedOldestPSeq = NumDocs - PurgedDocsLimit + 1,
     ?assertEqual(ExpectedOldestPSeq, OldestPSeq),
     ?assertEqual(PurgedDocsLimit, length(PurgedIdRevs2)).

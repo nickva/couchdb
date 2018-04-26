@@ -180,7 +180,7 @@ apply_batch(Db, Actions) ->
     {ok, Db2} = couch_db:reopen(Db1),
 
     if PurgeInfos == [] -> ok; true ->
-        {ok, _, _} = couch_db:purge_docs(Db2, PurgeInfos)
+        {ok, _} = couch_db:purge_docs(Db2, PurgeInfos)
     end,
     couch_db:reopen(Db2).
 
@@ -222,7 +222,7 @@ gen_write(Db, {create, {DocId, Body, Atts}}) ->
 
 gen_write(_Db, {purge, {DocId, PrevRevs0, _}}) ->
     PrevRevs = if is_list(PrevRevs0) -> PrevRevs0; true -> [PrevRevs0] end,
-    {purge, {DocId, PrevRevs}};
+    {purge, {couch_uuids:random(), DocId, PrevRevs}};
 
 gen_write(Db, {Action, {DocId, Body, Atts}}) ->
     #full_doc_info{} = PrevFDI = couch_db:get_full_doc_info(Db, DocId),
@@ -369,11 +369,12 @@ db_changes_as_term(Db) ->
 
 
 db_purged_docs_as_term(Db) ->
-    PSeq = couch_db_engine:get_oldest_purge_seq(Db) - 1,
+    InitPSeq = couch_db_engine:get_oldest_purge_seq(Db) - 1,
     FoldFun = fun({PSeq, UUID, Id, Revs}, Acc) ->
         {ok, [{PSeq, UUID, Id, Revs} | Acc]}
     end,
-    {ok, PDocs} = couch_db_engine:fold_purge_infos(Db, PSeq, FoldFun, [], []),
+    {ok, PDocs} = couch_db_engine:fold_purge_infos(
+            Db, InitPSeq, FoldFun, [], []),
     lists:reverse(PDocs).
 
 

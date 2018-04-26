@@ -82,7 +82,7 @@ cet_purge_conflicts() ->
 
     ?assertEqual(1, couch_db_engine:get_doc_count(Db3)),
     ?assertEqual(0, couch_db_engine:get_del_doc_count(Db3)),
-    ?assertEqual(4, couch_db_engine:get_update_seq(Db3)),
+    ?assertEqual(3, couch_db_engine:get_update_seq(Db3)),
     ?assertEqual(1, couch_db_engine:get_purge_seq(Db3)),
     ?assertEqual([{<<"foo">>, [Rev1]}], PIdRevs3),
 
@@ -99,7 +99,7 @@ cet_purge_conflicts() ->
 
     ?assertEqual(0, couch_db_engine:get_doc_count(Db4)),
     ?assertEqual(0, couch_db_engine:get_del_doc_count(Db4)),
-    ?assertEqual(5, couch_db_engine:get_update_seq(Db4)),
+    ?assertEqual(4, couch_db_engine:get_update_seq(Db4)),
     ?assertEqual(2, couch_db_engine:get_purge_seq(Db4)),
     ?assertEqual([{<<"foo">>, [Rev2]}, {<<"foo">>, [Rev1]}], PIdRevs4).
 
