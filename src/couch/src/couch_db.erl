@@ -80,6 +80,8 @@
     get_purge_infos/2,
 
     get_minimum_purge_seq/1,
+    purge_client_exists/3,
+    get_purge_client_fun/2,
 
     update_doc/3,
     update_doc/4,
@@ -481,7 +483,7 @@ get_purge_client_fun(DocId, Props) ->
     M = try
         binary_to_existing_atom(M0, latin1)
     catch error:badarg ->
-        Fmt1 = "Missing index module '~s' for purge checkpoint '~s'",
+        Fmt1 = "Missing index module '~p' for purge checkpoint '~p'",
         couch_log:error(Fmt1, [M0, DocId]),
         throw(failed)
     end,
@@ -491,7 +493,7 @@ get_purge_client_fun(DocId, Props) ->
         F = binary_to_existing_atom(F0, latin1),
         fun M:F/2
     catch error:badarg ->
-        Fmt2 = "Missing function '~s' in '~s' for purge checkpoint '~s'",
+        Fmt2 = "Missing function '~p' in '~p' for purge checkpoint '~p'",
         couch_log:error(Fmt2, [F0, M0, DocId]),
         throw(failed)
     end.
