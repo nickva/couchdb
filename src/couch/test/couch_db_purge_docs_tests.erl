@@ -120,6 +120,9 @@ test_purge_2_to_purge_3(DbName) ->
 
         assertProps(DbName, [
             {doc_count, 0},
+            {del_doc_count, 0},
+            {update_seq, 2},
+            {changes, 0},
             {purge_seq, 1},
             {purge_infos, PurgeInfos}
         ])
@@ -137,6 +140,7 @@ test_purge_all(DbName) ->
             {doc_count, 2},
             {del_doc_count, 0},
             {update_seq, 2},
+            {changes, 2},
             {purge_seq, 0},
             {purge_infos, []}
         ]),
@@ -155,6 +159,7 @@ test_purge_all(DbName) ->
             {doc_count, 0},
             {del_doc_count, 0},
             {update_seq, 3},
+            {changes, 0},
             {purge_seq, 2},
             {purge_infos, PurgeInfos}
         ])
@@ -176,6 +181,7 @@ test_all_removal_purges(DbName) ->
             {doc_count, 0},
             {del_doc_count, 1},
             {update_seq, 2},
+            {changes, 1},
             {purge_seq, 0},
             {purge_infos, []}
         ]),
@@ -192,6 +198,7 @@ test_all_removal_purges(DbName) ->
             {doc_count, 0},
             {del_doc_count, 0},
             {update_seq, 3},
+            {changes, 0},
             {purge_seq, 1},
             {purge_infos, PurgeInfos}
         ])
@@ -209,6 +216,7 @@ test_purge_some(DbName) ->
             {doc_count, 2},
             {del_doc_count, 0},
             {update_seq, 2},
+            {changes, 2},
             {purge_seq, 0},
             {purge_infos, []}
         ]),
@@ -224,6 +232,7 @@ test_purge_some(DbName) ->
             {doc_count, 1},
             {del_doc_count, 0},
             {update_seq, 3},
+            {changes, 1},
             {purge_seq, 1},
             {purge_infos, PurgeInfos}
         ])
@@ -241,6 +250,7 @@ test_purge_none(DbName) ->
             {doc_count, 2},
             {del_doc_count, 0},
             {update_seq, 2},
+            {changes, 2},
             {purge_seq, 0},
             {purge_infos, []}
         ]),
@@ -251,6 +261,7 @@ test_purge_none(DbName) ->
             {doc_count, 2},
             {del_doc_count, 0},
             {update_seq, 2},
+            {changes, 2},
             {purge_seq, 0},
             {purge_infos, []}
         ])
@@ -268,6 +279,7 @@ test_purge_missing_docid(DbName) ->
             {doc_count, 2},
             {del_doc_count, 0},
             {update_seq, 2},
+            {changes, 2},
             {purge_seq, 0},
             {purge_infos, []}
         ]),
@@ -282,6 +294,7 @@ test_purge_missing_docid(DbName) ->
             {doc_count, 2},
             {del_doc_count, 0},
             {update_seq, 3},
+            {changes, 2},
             {purge_seq, 1},
             {purge_infos, PurgeInfos}
         ])
@@ -300,7 +313,7 @@ test_purge_repeated_docid(DbName) ->
             {del_doc_count, 0},
             {update_seq, 2},
             {purge_seq, 0},
-            {changes, 1},
+            {changes, 2},
             {purge_infos, []}
         ]),
 
@@ -310,7 +323,7 @@ test_purge_repeated_docid(DbName) ->
         ],
 
         {ok, Resp} = purge(DbName, PurgeInfos),
-        %?assertEqual([{ok, [Rev1]}, {ok, []}], Resp),
+        ?assertEqual([{ok, [Rev1]}, {ok, []}], Resp),
 
         assertProps(DbName, [
             {doc_count, 1},
@@ -336,6 +349,7 @@ test_purge_id_not_exist(DbName) ->
             {doc_count, 0},
             {del_doc_count, 0},
             {update_seq, 1},
+            {changes, 0},
             {purge_seq, 1},
             {purge_infos, PurgeInfos}
         ])
@@ -363,6 +377,7 @@ test_purge_non_leaf_rev(DbName) ->
             {doc_count, 1},
             {del_doc_count, 0},
             {update_seq, 3},
+            {changes, 1},
             {purge_seq, 1},
             {purge_infos, PurgeInfos}
         ])
@@ -387,6 +402,7 @@ test_purge_invalid_rev(DbName) ->
             {doc_count, 2},
             {del_doc_count, 0},
             {update_seq, 3},
+            {changes, 2},
             {purge_seq, 1},
             {purge_infos, PurgeInfos}
         ])
@@ -414,6 +430,7 @@ test_purge_partial(DbName) ->
             {doc_count, 1},
             {del_doc_count, 0},
             {update_seq, 3},
+            {changes, 1},
             {purge_seq, 1},
             {purge_infos, PurgeInfos}
         ])
@@ -434,6 +451,7 @@ test_purge_repeated_rev(DbName) ->
             {doc_count, 1},
             {del_doc_count, 0},
             {update_seq, 2},
+            {changes, 1},
             {purge_seq, 0},
             {purge_infos, []}
         ]),
@@ -449,6 +467,7 @@ test_purge_repeated_rev(DbName) ->
             {doc_count, 1},
             {del_doc_count, 0},
             {update_seq, 3},
+            {changes, 1},
             {purge_seq, 1},
             {purge_infos, PurgeInfos1}
         ]),
@@ -463,6 +482,7 @@ test_purge_repeated_rev(DbName) ->
             {doc_count, 0},
             {del_doc_count, 0},
             {update_seq, 4},
+            {changes, 0},
             {purge_seq, 2},
             {purge_infos, PurgeInfos1 ++ PurgeInfos2}
         ])
@@ -493,6 +513,7 @@ test_purge_deep_tree(DbName) ->
             {doc_count, 0},
             {del_doc_count, 0},
             {update_seq, ?REV_DEPTH + 2},
+            {changes, 0},
             {purge_seq, 1},
             {purge_infos, PurgeInfos}
         ])
@@ -507,6 +528,7 @@ test_purge_duplicate_UUID(DbName) ->
             {doc_count, 1},
             {del_doc_count, 0},
             {update_seq, 1},
+            {changes, 1},
             {purge_seq, 0},
             {purge_infos, []}
         ]),
@@ -527,7 +549,8 @@ test_purge_duplicate_UUID(DbName) ->
         assertProps(DbName, [
             {doc_count, 0},
             {del_doc_count, 0},
-            {update_seq, 2},
+            {update_seq, 3},
+            {changes, 0},
             {purge_seq, 1},
             {purge_infos, PurgeInfos}
         ])
@@ -542,6 +565,7 @@ test_purge_with_replication({Source, Target}) ->
             {doc_count, 1},
             {del_doc_count, 0},
             {update_seq, 1},
+            {changes, 1},
             {purge_seq, 0},
             {purge_infos, []}
         ]),
@@ -558,6 +582,7 @@ test_purge_with_replication({Source, Target}) ->
             {doc_count, 1},
             {del_doc_count, 0},
             {update_seq, 1},
+            {changes, 1},
             {purge_seq, 0},
             {purge_infos, []}
         ]),
@@ -573,6 +598,7 @@ test_purge_with_replication({Source, Target}) ->
             {doc_count, 0},
             {del_doc_count, 0},
             {update_seq, 2},
+            {changes, 0},
             {purge_seq, 1},
             {purge_infos, PurgeInfos}
         ]),
@@ -589,6 +615,7 @@ test_purge_with_replication({Source, Target}) ->
             {doc_count, 1},
             {del_doc_count, 0},
             {update_seq, 1},
+            {changes, 1},
             {purge_seq, 0},
             {purge_infos, []}
         ]),
@@ -609,6 +636,7 @@ test_purge_with_replication({Source, Target}) ->
             {doc_count, 1},
             {del_doc_count, 0},
             {update_seq, 3},
+            {changes, 1},
             {purge_seq, 1},
             {purge_infos, PurgeInfos}
         ])
@@ -723,7 +751,8 @@ fold_fun({_PSeq, UUID, Id, Revs}, Acc) ->
     {ok, [{UUID, Id, Revs} | Acc]}.
 
 
-fold_changes(_, Acc) ->
+fold_changes(_A, Acc) ->
+    %io:format(standard_error, "~nCHANGE: ~p~n~n", [_A]),
     {ok, Acc + 1}.
 
 
