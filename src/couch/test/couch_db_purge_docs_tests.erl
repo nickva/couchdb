@@ -426,13 +426,20 @@ test_purge_repeated_rev(DbName) ->
             couch_db:ensure_full_commit(Db2),
             {ok, Db3} = couch_db:reopen(Db2),
 
+            ?assertEqual(1, couch_db_engine:get_doc_count(Db3)),
+            ?assertEqual(0, couch_db_engine:get_del_doc_count(Db3)),
+            ?assertEqual(2, couch_db_engine:get_update_seq(Db3)),
+            ?assertEqual(0, couch_db_engine:get_purge_seq(Db3)),
+
             UUID = couch_uuids:new(),
             UUID2 = couch_uuids:new(),
 
-            {ok, _Doc2} = couch_db:get_full_doc_info(Db2, <<"foo">>),
+            FDI = couch_db:get_full_doc_info(Db3, <<"foo">>),
+            Revs2 = FDI#full_doc_info.rev_tree,
 
-            {ok, [{ok, _PRevs}, {ok, _PRevs2}]} = couch_db:purge_docs(Db2,
-                [{UUID, <<"foo">>, [Rev]}, {UUID2, <<"foo">>, [Rev]}]
+            [{1, {_Rev1, _Leaf1, []}}, {1, {Rev2, _Leaf2, []}}] = Revs2,
+            {ok, [ {ok, _PRevs2}]} = couch_db:purge_docs(Db3,
+                [{UUID2, <<"foo">>, [{1, Rev2}]}]
             ),
 
             {ok, Db4} = couch_db:reopen(Db3),
@@ -442,8 +449,7 @@ test_purge_repeated_rev(DbName) ->
             ?assertEqual(1, couch_db_engine:get_doc_count(Db4)),
             ?assertEqual(0, couch_db_engine:get_del_doc_count(Db4)),
             ?assertEqual(3, couch_db_engine:get_update_seq(Db4)),
-            ?assertEqual(1, couch_db_engine:get_purge_seq(Db4)),
-            ?assertEqual([{<<"foo">>, [Rev]}], PIdsRevs)
+            ?assertEqual(2, couch_db_engine:get_purge_seq(Db4))
         end).
 
 
