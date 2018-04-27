@@ -51,7 +51,7 @@ couch_db_purge_docs() ->
                 fun test_purge_none/1,
                 fun test_purge_missing_docid/1,
                 fun test_purge_repeated_docid/1,
-                %fun test_purge_repeated_rev/1, % improving
+                fun test_purge_repeated_rev/1, % improving
                 fun test_purge_partial/1,
                 fun test_all_removal_purges/1,
                 fun test_purge_invalid_rev/1,
@@ -431,25 +431,40 @@ test_purge_repeated_rev(DbName) ->
             ?assertEqual(2, couch_db_engine:get_update_seq(Db3)),
             ?assertEqual(0, couch_db_engine:get_purge_seq(Db3)),
 
-            UUID = couch_uuids:new(),
+            UUID1 = couch_uuids:new(),
             UUID2 = couch_uuids:new(),
 
             FDI = couch_db:get_full_doc_info(Db3, <<"foo">>),
             Revs2 = FDI#full_doc_info.rev_tree,
 
-            [{1, {_Rev1, _Leaf1, []}}, {1, {Rev2, _Leaf2, []}}] = Revs2,
-            {ok, [ {ok, _PRevs2}]} = couch_db:purge_docs(Db3,
+            [{1, {Rev1, _Leaf1, []}}, {1, {Rev2, _Leaf2, []}}] = Revs2,
+            {ok, [{ok, _PRevs2}]} = couch_db:purge_docs(Db3,
                 [{UUID2, <<"foo">>, [{1, Rev2}]}]
             ),
-
             {ok, Db4} = couch_db:reopen(Db3),
-            {ok, PIdsRevs} = couch_db:fold_purge_infos(
+            {ok, PIdsRevs4} = couch_db:fold_purge_infos(
                 Db4, 0, fun fold_fun/2, [], []),
+
             % still has one doc
             ?assertEqual(1, couch_db_engine:get_doc_count(Db4)),
             ?assertEqual(0, couch_db_engine:get_del_doc_count(Db4)),
             ?assertEqual(3, couch_db_engine:get_update_seq(Db4)),
-            ?assertEqual(2, couch_db_engine:get_purge_seq(Db4))
+            ?assertEqual(1, couch_db_engine:get_purge_seq(Db4)),
+            ?assertEqual([{<<"foo">>, [{1, Rev2}]}], PIdsRevs4),
+
+            {ok, [{ok, _}]} = couch_db:purge_docs(Db4,
+                    [{UUID1, <<"foo">>, [{1, Rev1}]}]),
+            {ok, Db5} = couch_db:reopen(Db4),
+            {ok, PIdsRevs5} = couch_db:fold_purge_infos(
+                Db5, 0, fun fold_fun/2, [], []),
+
+            % Completely cleared
+            ?assertEqual(0, couch_db_engine:get_doc_count(Db5)),
+            ?assertEqual(0, couch_db_engine:get_del_doc_count(Db5)),
+            ?assertEqual(4, couch_db_engine:get_update_seq(Db5)),
+            ?assertEqual(2, couch_db_engine:get_purge_seq(Db5)),
+            ?assertEqual([{<<"foo">>, [{1, Rev1}]}, {<<"foo">>, [{1, Rev2}]}],
+                    PIdsRevs5)
         end).
 
 
@@ -594,3 +609,6 @@ save_doc(Db, Json) ->
 
 fold_fun({_PSeq, _UUID, Id, Revs}, Acc) ->
     {ok, [{Id, Revs} | Acc]}.
+
+fold_docs_fun(Doc, Acc) ->
+    {ok, [Doc | Acc]}.
