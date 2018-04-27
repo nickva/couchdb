@@ -881,7 +881,7 @@ read_doc_body(#db{} = Db, RawDoc) ->
 
 load_purge_infos(#db{} = Db, UUIDs) ->
     #db{engine = {Engine, EngineState}} = Db,
-    Engine:open_purged_docs(EngineState, UUIDs).
+    Engine:load_purge_infos(EngineState, UUIDs).
 
 
 serialize_doc(#db{} = Db, #doc{} = Doc) ->
