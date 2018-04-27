@@ -457,34 +457,21 @@ test_purge_repeated_rev(DbName) ->
         ]),
 
         PurgeInfos1 = [
-            {uuid(), <<"foo">>, [Rev1]}
+            {uuid(), <<"foo">>, [Rev1]},
+            {uuid(), <<"foo">>, [Rev1, Rev2]}
         ],
 
-        {ok, [{ok, PRevs1}]} = purge(DbName, PurgeInfos1),
+        {ok, [{ok, PRevs1}, {ok, PRevs2}]} = purge(DbName, PurgeInfos1),
         ?assertEqual([Rev1], PRevs1),
-
-        assertProps(DbName, [
-            {doc_count, 1},
-            {del_doc_count, 0},
-            {update_seq, 3},
-            {changes, 1},
-            {purge_seq, 1},
-            {purge_infos, PurgeInfos1}
-        ]),
-
-        PurgeInfos2 = [
-            {uuid(), <<"foo">>, [Rev2]}
-        ],
-        {ok, [{ok, PRevs2}]} = purge(DbName, PurgeInfos2),
         ?assertEqual([Rev2], PRevs2),
 
         assertProps(DbName, [
             {doc_count, 0},
             {del_doc_count, 0},
-            {update_seq, 4},
+            {update_seq, 3},
             {changes, 0},
             {purge_seq, 2},
-            {purge_infos, PurgeInfos1 ++ PurgeInfos2}
+            {purge_infos, PurgeInfos1}
         ])
     end).
 
