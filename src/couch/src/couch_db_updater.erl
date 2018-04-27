@@ -105,7 +105,7 @@ handle_call({purge_docs, PurgeReqs0, Options}, _From, Db) ->
     IsRepl = lists:member(replicated_changes, Options),
     PurgeReqs = if not IsRepl -> PurgeReqs0; true ->
         UUIDs = [UUID || {UUID, _Id, _Revs} <- PurgeReqs0],
-        {ok, PurgeInfos} = couch_db:load_purge_infos(Db, UUIDs),
+        PurgeInfos = couch_db_engine:load_purge_infos(Db, UUIDs),
         lists:flatmap(fun
             ({not_found, PReq}) -> [PReq];
             ({{_, _, _, _}, _}) -> []
