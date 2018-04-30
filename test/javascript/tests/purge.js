@@ -57,8 +57,8 @@ couchTests.purge = function(debug) {
   var result = JSON.parse(xhr.responseText);
   var newInfo = db.info();
 
-  T(result.purged["1"].purged[0] == doc1._rev);
-  T(result.purged["2"].purged[0] == doc2._rev);
+  T(result.purged["1"] == doc1._rev);
+  T(result.purged["2"] == doc2._rev);
 
   T(db.open("1") == null);
   T(db.open("2") == null);
