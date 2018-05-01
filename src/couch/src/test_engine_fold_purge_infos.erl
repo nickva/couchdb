@@ -99,19 +99,27 @@ cet_id_rev_repeated() ->
     Actions2 = [
         {purge, {<<"foo">>, Rev1}}
     ],
+
     {ok, Db3} = test_engine_util:apply_actions(Db2, Actions2),
-    PurgedIdRevs0 = [{<<"foo">>, [Rev1]}],
     {ok, PurgedIdRevs1} = couch_db_engine:fold_purge_infos(
             Db3, 0, fun fold_fun/2, [], []),
-    ?assertEqual(PurgedIdRevs0, PurgedIdRevs1),
+    ExpectedPurgedIdRevs1 = [
+        {<<"foo">>, [Rev1]}
+    ],
+
+    ?assertEqual(ExpectedPurgedIdRevs1, lists:reverse(PurgedIdRevs1)),
     ?assertEqual(1, couch_db_engine:get_purge_seq(Db3)),
 
     % purge the same Id,Rev when the doc still exists
     {ok, Db4} = test_engine_util:apply_actions(Db3, Actions2),
     {ok, PurgedIdRevs2} = couch_db_engine:fold_purge_infos(
             Db4, 0, fun fold_fun/2, [], []),
-    ?assertEqual(PurgedIdRevs0, PurgedIdRevs2),
-    ?assertEqual(1, couch_db_engine:get_purge_seq(Db4)),
+    ExpectedPurgedIdRevs2 = [
+        {<<"foo">>, [Rev1]},
+        {<<"foo">>, [Rev1]}
+    ],
+    ?assertEqual(ExpectedPurgedIdRevs2, lists:reverse(PurgedIdRevs2)),
+    ?assertEqual(2, couch_db_engine:get_purge_seq(Db4)),
 
     [FDI2] = couch_db_engine:open_docs(Db4, [<<"foo">>]),
     PrevRev2 = test_engine_util:prev_rev(FDI2),
@@ -120,14 +128,30 @@ cet_id_rev_repeated() ->
         {purge, {<<"foo">>, Rev2}}
     ],
     {ok, Db5} = test_engine_util:apply_actions(Db4, Actions3),
-    PurgedIdRevs00 = [{<<"foo">>, [Rev1]}, {<<"foo">>, [Rev2]}],
+
+    {ok, PurgedIdRevs3} = couch_db_engine:fold_purge_infos(
+            Db5, 0, fun fold_fun/2, [], []),
+    ExpectedPurgedIdRevs3 = [
+        {<<"foo">>, [Rev1]},
+        {<<"foo">>, [Rev1]},
+        {<<"foo">>, [Rev2]}
+    ],
+    ?assertEqual(ExpectedPurgedIdRevs3, lists:reverse(PurgedIdRevs3)),
+    ?assertEqual(3, couch_db_engine:get_purge_seq(Db5)),
 
     % purge the same Id,Rev when the doc was completely purged
     {ok, Db6} = test_engine_util:apply_actions(Db5, Actions3),
-    {ok, PurgedIdRevs3} = couch_db_engine:fold_purge_infos(
+
+    {ok, PurgedIdRevs4} = couch_db_engine:fold_purge_infos(
             Db6, 0, fun fold_fun/2, [], []),
-    ?assertEqual(PurgedIdRevs00, lists:reverse(PurgedIdRevs3)),
-    ?assertEqual(2, couch_db_engine:get_purge_seq(Db6)).
+    ExpectedPurgedIdRevs4 = [
+        {<<"foo">>, [Rev1]},
+        {<<"foo">>, [Rev1]},
+        {<<"foo">>, [Rev2]},
+        {<<"foo">>, [Rev2]}
+    ],
+    ?assertEqual(ExpectedPurgedIdRevs4, lists:reverse(PurgedIdRevs4)),
+    ?assertEqual(4, couch_db_engine:get_purge_seq(Db6)).
 
 
 fold_fun({_PSeq, _UUID, Id, Revs}, Acc) ->

@@ -21,9 +21,11 @@ setup() ->
     {ok, _Db} = create_db(DbName),
     DbName.
 
+
 teardown(DbName) ->
     delete_db(DbName),
     ok.
+
 
 couch_db_purge_seqs_test_() ->
     {
@@ -50,6 +52,7 @@ couch_db_purge_seqs() ->
                 fun test_purge_seq/1
         ]
     }.
+
 
 test_update_seq_bounce(DbName) ->
     ?_test(
@@ -99,7 +102,7 @@ test_update_seq_inc_on_complete_purge(DbName) ->
             ),
 
             {ok, Db3} = couch_db:reopen(Db2),
-            ?assertEqual(2, couch_db_engine:get_update_seq(Db3)),
+            ?assertEqual(3, couch_db_engine:get_update_seq(Db3)),
 
             ?assertEqual([], PRevs),
 
@@ -111,7 +114,7 @@ test_update_seq_inc_on_complete_purge(DbName) ->
             ?assertEqual([Rev], PRevs2),
 
             {ok, Db4} = couch_db:reopen(Db3),
-            ?assertEqual(3, couch_db_engine:get_update_seq(Db4))
+            ?assertEqual(4, couch_db_engine:get_update_seq(Db4))
         end).
 
 
