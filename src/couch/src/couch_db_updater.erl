@@ -114,41 +114,8 @@ handle_call({purge_docs, PurgeReqs0, Options}, _From, Db) ->
             ({{_, _, _, _}, _}) -> []
         end, lists:zip(PurgeInfos, PurgeReqs0))
     end,
-
-    Ids = lists:usort(lists:map(fun({_UUID, Id, _Revs}) -> Id end, PurgeReqs)),
-    FDIs = couch_db_engine:open_docs(Db, Ids),
-    USeq = couch_db_engine:get_update_seq(Db),
-
-    IdFDIs = lists:zip(Ids, FDIs),
-    {NewIdFDIs, Replies} = purge_docs(PurgeReqs, IdFDIs, USeq, []),
-
-    Pairs = lists:flatmap(fun({DocId, OldFDI}) ->
-        {DocId, NewFDI} = lists:keyfind(DocId, 1, NewIdFDIs),
-        %io:format(standard_error, "~nPAIR: ~p~n", [{OldFDI, NewFDI}]),
-        case {OldFDI, NewFDI} of
-            {not_found, not_found} ->
-                [];
-            {#full_doc_info{} = A, #full_doc_info{} = A} ->
-                [];
-            {#full_doc_info{}, _} ->
-                [{OldFDI, NewFDI}]
-        end
-    end, IdFDIs),
-
-    PSeq = couch_db_engine:get_purge_seq(Db),
-    {RevPInfos, _} = lists:foldl(fun({UUID, DocId, Revs}, {PIAcc, PSeqAcc}) ->
-        Info = {PSeqAcc + 1, UUID, DocId, Revs},
-        {[Info | PIAcc], PSeqAcc + 1}
-    end, {[], PSeq}, PurgeReqs),
-    PInfos = lists:reverse(RevPInfos),
-
-    %io:format(standard_error, "~n~nPAIRS: ~p~n~n", [Pairs]),
-
-    {ok, Db1} = couch_db_engine:purge_docs(Db, Pairs, PInfos),
-    Db2 = commit_data(Db1),
-    ok = gen_server:call(couch_server, {db_updated, Db2}, infinity),
-    couch_event:notify(Db2#db.name, updated),
-    {reply, {ok, Replies}, Db2, idle_limit()};
+    {ok, NewDb, Replies} = purge_docs(Db, PurgeReqs),
+    {reply, {ok, Replies}, NewDb, idle_limit()};
 
 handle_call(Msg, From, Db) ->
     case couch_db_engine:handle_db_updater_call(Msg, From, Db) of
@@ -674,10 +641,47 @@ update_local_doc_revs(Docs) ->
     end, Docs).
 
 
-purge_docs([], IdFDIs, _USeq, Replies) ->
+purge_docs(Db, []) ->
+    {ok, Db, []};
+
+purge_docs(Db, PurgeReqs) ->
+    Ids = lists:usort(lists:map(fun({_UUID, Id, _Revs}) -> Id end, PurgeReqs)),
+    FDIs = couch_db_engine:open_docs(Db, Ids),
+    USeq = couch_db_engine:get_update_seq(Db),
+
+    IdFDIs = lists:zip(Ids, FDIs),
+    {NewIdFDIs, Replies} = apply_purge_reqs(PurgeReqs, IdFDIs, USeq, []),
+
+    Pairs = lists:flatmap(fun({DocId, OldFDI}) ->
+        {DocId, NewFDI} = lists:keyfind(DocId, 1, NewIdFDIs),
+        case {OldFDI, NewFDI} of
+            {not_found, not_found} ->
+                [];
+            {#full_doc_info{} = A, #full_doc_info{} = A} ->
+                [];
+            {#full_doc_info{}, _} ->
+                [{OldFDI, NewFDI}]
+        end
+    end, IdFDIs),
+
+    PSeq = couch_db_engine:get_purge_seq(Db),
+    {RevPInfos, _} = lists:foldl(fun({UUID, DocId, Revs}, {PIAcc, PSeqAcc}) ->
+        Info = {PSeqAcc + 1, UUID, DocId, Revs},
+        {[Info | PIAcc], PSeqAcc + 1}
+    end, {[], PSeq}, PurgeReqs),
+    PInfos = lists:reverse(RevPInfos),
+
+    {ok, Db1} = couch_db_engine:purge_docs(Db, Pairs, PInfos),
+    Db2 = commit_data(Db1),
+    ok = gen_server:call(couch_server, {db_updated, Db2}, infinity),
+    couch_event:notify(Db2#db.name, updated),
+    {ok, Db2, Replies}.
+
+
+apply_purge_reqs([], IdFDIs, _USeq, Replies) ->
     {IdFDIs, lists:reverse(Replies)};
 
-purge_docs([Req | RestReqs], IdFDIs, USeq, Replies) ->
+apply_purge_reqs([Req | RestReqs], IdFDIs, USeq, Replies) ->
     {_UUID, DocId, Revs} = Req,
     {value, {_, FDI0}, RestIdFDIs} = lists:keytake(DocId, 1, IdFDIs),
     {NewFDI, RemovedRevs, NewUSeq} = case FDI0 of
@@ -713,8 +717,9 @@ purge_docs([Req | RestReqs], IdFDIs, USeq, Replies) ->
             % Not found means nothing to change
             {not_found, [], USeq}
     end,
+    NewIdFDIs = [{DocId, NewFDI} | RestIdFDIs],
     NewReplies = [{ok, RemovedRevs} | Replies],
-    purge_docs(RestReqs, [{DocId, NewFDI} | RestIdFDIs], NewUSeq, NewReplies).
+    apply_purge_reqs(RestReqs, NewIdFDIs, NewUSeq, NewReplies).
 
 
 commit_data(Db) ->
