@@ -72,7 +72,7 @@ load_purge_infos(Node, DbName, SourceUUID, Count) ->
 
 save_purge_checkpoint(Node, DbName, PurgeDocId, Body) ->
     Args = [DbName, PurgeDocId, Body],
-    rexi_call(Node, {mem3_rpc, save_purge_checkpoint, Args}).
+    rexi_call(Node, {mem3_rpc, save_purge_checkpoint_rpc, Args}).
 
 
 purge_docs(Node, DbName, PurgeInfos, Options) ->
@@ -160,7 +160,7 @@ load_purge_infos_rpc(DbName, SrcUUID, BatchSize) ->
                     couch_util:get_value(<<"purge_seq">>, Props);
                 {not_found, _} ->
                     {ok, Oldest} = couch_db:get_oldest_purge_seq(Db),
-                    Oldest
+                    erlang:max(0, Oldest - 1)
             end,
             FoldFun = fun({PSeq, UUID, Id, Revs}, {Count, Infos, _}) ->
                 NewCount = Count + length(Revs),
@@ -173,7 +173,7 @@ load_purge_infos_rpc(DbName, SrcUUID, BatchSize) ->
                     couch_db:fold_purge_infos(Db, StartSeq, FoldFun, InitAcc),
             {ok, PurgeSeq} = couch_db:get_purge_seq(Db),
             Remaining = PurgeSeq - ThroughSeq,
-            rexi:reply({ok, PurgeDocId, PurgeInfos, ThroughSeq, Remaining});
+            rexi:reply({ok, {PurgeDocId, PurgeInfos, ThroughSeq, Remaining}});
         Else ->
             rexi:reply(Else)
     end.
@@ -185,8 +185,7 @@ save_purge_checkpoint_rpc(DbName, PurgeDocId, Body) ->
         {ok, Db} ->
             Doc = #doc{id = PurgeDocId, body = Body},
             Resp = try couch_db:update_doc(Db, Doc, []) of
-                {ok, _} -> ok;
-                Else -> {error, Else}
+                Resp0 -> Resp0
             catch T:R ->
                 {T, R}
             end,

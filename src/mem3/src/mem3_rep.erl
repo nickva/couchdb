@@ -231,13 +231,13 @@ pull_purges(#acc{} = Acc0) ->
 
     with_src_db(Acc0, fun(Db) ->
         SrcUUID = couch_db:get_uuid(Db),
-        {ok, LocalPurgeId, Infos, ThroughSeq, Remaining} =
+        {LocalPurgeId, Infos, ThroughSeq, Remaining} =
                 mem3_rpc:load_purge_infos(TgtNode, TgtDbName, SrcUUID, Count),
 
         if Infos == [] -> ok; true ->
             {ok, _} = couch_db:purge_docs(Db, Infos, [replicated_edits]),
             Body = purge_cp_body(Acc0, ThroughSeq),
-            ok = mem3_rpc:save_purge_checkpoint(
+            mem3_rpc:save_purge_checkpoint(
                     TgtNode, TgtDbName, LocalPurgeId, Body)
         end,
 
@@ -270,7 +270,7 @@ push_purges(#acc{} = Acc0) ->
                 couch_util:get_value(<<"purge_seq">>, Props);
             {not_found, _} ->
                 {ok, Oldest} = couch_db:get_oldest_purge_seq(Db),
-                Oldest
+                erlang:max(0, Oldest - 1)
         end,
 
         FoldFun = fun({PSeq, UUID, Id, Revs}, {Count, Infos, _}) ->
@@ -466,7 +466,7 @@ save_on_target(Node, Name, Docs) ->
 
 
 purge_on_target(Node, Name, PurgeInfos) ->
-    {ok, _} = mem3_rpc:purge_docs(Node, Name, PurgeInfos, [
+    mem3_rpc:purge_docs(Node, Name, PurgeInfos, [
         replicated_changes,
         full_commit,
         ?ADMIN_CTX,
