@@ -18,16 +18,17 @@
 
 
 -define(TEST_MODULES, [
-    test_engine_open_close_delete,
-    test_engine_get_set_props,
-    test_engine_read_write_docs,
-    test_engine_attachments,
-    test_engine_fold_docs,
-    test_engine_fold_changes,
-    test_engine_fold_purge_infos,
-    test_engine_purge_docs,
-    test_engine_compaction,
-    test_engine_ref_counting
+    %% test_engine_open_close_delete,
+    %% test_engine_get_set_props,
+    %% test_engine_read_write_docs,
+    %% test_engine_attachments,
+    %% test_engine_fold_docs,
+    %% test_engine_fold_changes,
+    %% test_engine_fold_purge_infos,
+    %% test_engine_purge_docs,
+    test_engine_purge_replication
+    %% test_engine_compaction,
+    %% test_engine_ref_counting
 ]).
 
 
@@ -48,10 +49,11 @@ create_tests(EngineApp, EngineModule, Extension) ->
         {atom_to_list(TestMod), gather(TestMod)}
     end, ?TEST_MODULES),
     Setup = fun() ->
-        Ctx = test_util:start_couch(),
+        Ctx = test_util:start_couch([mem3, fabric]),
         EngineModStr = atom_to_list(EngineModule),
         config:set("couchdb_engines", Extension, EngineModStr, false),
         config:set("log", "include_sasl", "false", false),
+        config:set("mem3", "replicate_purges", "true", false),
         Ctx
     end,
     {
@@ -134,6 +136,12 @@ shutdown_db(Db) ->
         end
     end).
 
+
+apply_actions(DbName, Actions) when is_binary(DbName) ->
+    {ok, Db0} = couch_db:open_int(DbName, [?ADMIN_CTX]),
+    {ok, Db1} = apply_actions(Db0, Actions),
+    couch_db:close(Db1),
+    ok;
 
 apply_actions(Db, []) ->
     {ok, Db};
@@ -319,17 +327,28 @@ prev_rev(#full_doc_info{} = FDI) ->
 
 
 db_as_term(Db) ->
+    db_as_term(Db, compact).
+
+db_as_term(DbName, Type) when is_binary(DbName) ->
+    {ok, Db} = couch_db:open_int(DbName, [?ADMIN_CTX]),
+    try
+        db_as_term(Db, Type)
+    after
+        couch_db:close(Db)
+    end;
+
+db_as_term(Db, Type) ->
     [
-        {props, db_props_as_term(Db)},
+        {props, db_props_as_term(Db, Type)},
         {docs, db_docs_as_term(Db)},
-        {local_docs, db_local_docs_as_term(Db)},
+        {local_docs, db_local_docs_as_term(Db, Type)},
         {changes, db_changes_as_term(Db)},
         {purged_docs, db_purged_docs_as_term(Db)}
     ].
 
 
-db_props_as_term(Db) ->
-    Props = [
+db_props_as_term(Db, Type) ->
+    Props0 = [
         get_doc_count,
         get_del_doc_count,
         get_disk_version,
@@ -341,6 +360,9 @@ db_props_as_term(Db) ->
         get_uuid,
         get_epochs
     ],
+    Props = if Type /= replication -> Props0; true ->
+        Props0 -- [get_uuid]
+    end,
     lists:map(fun(Fun) ->
         {Fun, couch_db_engine:Fun(Db)}
     end, Props).
@@ -354,8 +376,15 @@ db_docs_as_term(Db) ->
     end, FDIs)).
 
 
-db_local_docs_as_term(Db) ->
-    FoldFun = fun(Doc, Acc) -> {ok, [Doc | Acc]} end,
+db_local_docs_as_term(Db, Type) ->
+    FoldFun = fun(Doc, Acc) ->
+        case Doc#doc.id of
+            <<"_local/purge-mem3-", _/binary>> when Type == replication ->
+                {ok, Acc};
+            _ ->
+                {ok, [Doc | Acc]}
+        end
+    end,
     {ok, LDocs} = couch_db:fold_local_docs(Db, FoldFun, [], []),
     lists:reverse(LDocs).
 
