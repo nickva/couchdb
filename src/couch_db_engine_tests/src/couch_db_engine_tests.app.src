@@ -10,11 +10,11 @@
 % License for the specific language governing permissions and limitations under
 % the License.
 
-{application, couch_engine_test, [
+{application, couch_db_engine_tests, [
     {description, "Apache CouchDB Pluggable Storage Engine Test Suite"},
     {vsn, git},
     {applications, [
         kernel,
-        stdlib,
+        stdlib
     ]}
 ]}.

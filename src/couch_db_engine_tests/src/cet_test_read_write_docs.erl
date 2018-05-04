@@ -10,17 +10,25 @@
 % License for the specific language governing permissions and limitations under
 % the License.
 
--module(test_engine_read_write_docs).
+-module(cet_test_read_write_docs).
 -compile(export_all).
+-compile(nowarn_export_all).
 
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("couch/include/couch_db.hrl").
 
 
-cet_read_empty_docs() ->
-    {ok, Db} = test_engine_util:create_db(),
+setup_test() ->
+    {ok, Db} = cet_util:create_db(),
+    Db.
 
+
+teardown_test(Db) ->
+    ok = couch_server:delete(couch_db:name(Db), []).
+
+
+cet_read_empty_docs(Db) ->
     ?assertEqual([not_found], couch_db_engine:open_docs(Db, [<<"foo">>])),
     ?assertEqual(
         [not_found, not_found],
@@ -28,9 +36,7 @@ cet_read_empty_docs() ->
     ).
 
 
-cet_read_empty_local_docs() ->
-    {ok, Db} = test_engine_util:create_db(),
-
+cet_read_empty_local_docs(Db) ->
     {LocalA, LocalB} = {<<"_local/a">>, <<"_local/b">>},
     ?assertEqual([not_found], couch_db_engine:open_local_docs(Db, [LocalA])),
     ?assertEqual(
@@ -39,9 +45,7 @@ cet_read_empty_local_docs() ->
     ).
 
 
-cet_write_one_doc() ->
-    {ok, Db1} = test_engine_util:create_db(),
-
+cet_write_one_doc(Db1) ->
     ?assertEqual(0, couch_db_engine:get_doc_count(Db1)),
     ?assertEqual(0, couch_db_engine:get_del_doc_count(Db1)),
     ?assertEqual(0, couch_db_engine:get_update_seq(Db1)),
@@ -49,11 +53,11 @@ cet_write_one_doc() ->
     Actions = [
         {create, {<<"foo">>, {[{<<"vsn">>, 1}]}}}
     ],
-    {ok, Db2} = test_engine_util:apply_actions(Db1, Actions),
+    {ok, Db2} = cet_util:apply_actions(Db1, Actions),
     ?assertEqual(1, couch_db_engine:get_doc_count(Db2)),
 
     {ok, _} = couch_db:ensure_full_commit(Db2),
-    test_engine_util:shutdown_db(Db2),
+    cet_util:shutdown_db(Db2),
 
     {ok, Db3} = couch_db:reopen(Db2),
 
@@ -66,7 +70,7 @@ cet_write_one_doc() ->
         rev = {RevPos, PrevRevId},
         deleted = Deleted,
         body_sp = DocPtr
-    } = test_engine_util:prev_rev(FDI),
+    } = cet_util:prev_rev(FDI),
 
     Doc0 = #doc{
         id = <<"foo">>,
@@ -82,9 +86,7 @@ cet_write_one_doc() ->
     ?assertEqual({[{<<"vsn">>, 1}]}, Body1).
 
 
-cet_write_two_docs() ->
-    {ok, Db1} = test_engine_util:create_db(),
-
+cet_write_two_docs(Db1) ->
     ?assertEqual(0, couch_db_engine:get_doc_count(Db1)),
     ?assertEqual(0, couch_db_engine:get_del_doc_count(Db1)),
     ?assertEqual(0, couch_db_engine:get_update_seq(Db1)),
@@ -93,9 +95,9 @@ cet_write_two_docs() ->
         {create, {<<"foo">>, {[{<<"vsn">>, 1}]}}},
         {create, {<<"bar">>, {[{<<"stuff">>, true}]}}}
     ],
-    {ok, Db2} = test_engine_util:apply_actions(Db1, Actions),
+    {ok, Db2} = cet_util:apply_actions(Db1, Actions),
     {ok, _} = couch_db:ensure_full_commit(Db2),
-    test_engine_util:shutdown_db(Db2),
+    cet_util:shutdown_db(Db2),
 
     {ok, Db3} = couch_db:reopen(Db2),
 
@@ -107,9 +109,7 @@ cet_write_two_docs() ->
     ?assertEqual(false, lists:member(not_found, Resps)).
 
 
-cet_write_three_doc_batch() ->
-    {ok, Db1} = test_engine_util:create_db(),
-
+cet_write_three_doc_batch(Db1) ->
     ?assertEqual(0, couch_db_engine:get_doc_count(Db1)),
     ?assertEqual(0, couch_db_engine:get_del_doc_count(Db1)),
     ?assertEqual(0, couch_db_engine:get_update_seq(Db1)),
@@ -121,9 +121,9 @@ cet_write_three_doc_batch() ->
             {create, {<<"baz">>, {[]}}}
         ]}
     ],
-    {ok, Db2} = test_engine_util:apply_actions(Db1, Actions),
+    {ok, Db2} = cet_util:apply_actions(Db1, Actions),
     {ok, _} = couch_db:ensure_full_commit(Db2),
-    test_engine_util:shutdown_db(Db2),
+    cet_util:shutdown_db(Db2),
 
     {ok, Db3} = couch_db:reopen(Db2),
 
@@ -135,9 +135,7 @@ cet_write_three_doc_batch() ->
     ?assertEqual(false, lists:member(not_found, Resps)).
 
 
-cet_update_doc() ->
-    {ok, Db1} = test_engine_util:create_db(),
-
+cet_update_doc(Db1) ->
     ?assertEqual(0, couch_db_engine:get_doc_count(Db1)),
     ?assertEqual(0, couch_db_engine:get_del_doc_count(Db1)),
     ?assertEqual(0, couch_db_engine:get_update_seq(Db1)),
@@ -146,9 +144,9 @@ cet_update_doc() ->
         {create, {<<"foo">>, {[{<<"vsn">>, 1}]}}},
         {update, {<<"foo">>, {[{<<"vsn">>, 2}]}}}
     ],
-    {ok, Db2} = test_engine_util:apply_actions(Db1, Actions),
+    {ok, Db2} = cet_util:apply_actions(Db1, Actions),
     {ok, _} = couch_db:ensure_full_commit(Db2),
-    test_engine_util:shutdown_db(Db2),
+    cet_util:shutdown_db(Db2),
 
     {ok, Db3} = couch_db:reopen(Db2),
 
@@ -162,7 +160,7 @@ cet_update_doc() ->
         rev = {RevPos, PrevRevId},
         deleted = Deleted,
         body_sp = DocPtr
-    } = test_engine_util:prev_rev(FDI),
+    } = cet_util:prev_rev(FDI),
 
     Doc0 = #doc{
         id = <<"foo">>,
@@ -179,9 +177,7 @@ cet_update_doc() ->
     ?assertEqual({[{<<"vsn">>, 2}]}, Body1).
 
 
-cet_delete_doc() ->
-    {ok, Db1} = test_engine_util:create_db(),
-
+cet_delete_doc(Db1) ->
     ?assertEqual(0, couch_db_engine:get_doc_count(Db1)),
     ?assertEqual(0, couch_db_engine:get_del_doc_count(Db1)),
     ?assertEqual(0, couch_db_engine:get_update_seq(Db1)),
@@ -190,9 +186,9 @@ cet_delete_doc() ->
         {create, {<<"foo">>, {[{<<"vsn">>, 1}]}}},
         {delete, {<<"foo">>, {[]}}}
     ],
-    {ok, Db2} = test_engine_util:apply_actions(Db1, Actions),
+    {ok, Db2} = cet_util:apply_actions(Db1, Actions),
     {ok, _} = couch_db:ensure_full_commit(Db2),
-    test_engine_util:shutdown_db(Db2),
+    cet_util:shutdown_db(Db2),
 
     {ok, Db3} = couch_db:reopen(Db2),
     ?assertEqual(0, couch_db_engine:get_doc_count(Db3)),
@@ -205,7 +201,7 @@ cet_delete_doc() ->
         rev = {RevPos, PrevRevId},
         deleted = Deleted,
         body_sp = DocPtr
-    } = test_engine_util:prev_rev(FDI),
+    } = cet_util:prev_rev(FDI),
 
     Doc0 = #doc{
         id = <<"foo">>,
@@ -222,9 +218,7 @@ cet_delete_doc() ->
     ?assertEqual({[]}, Body1).
 
 
-cet_write_local_doc() ->
-    {ok, Db1} = test_engine_util:create_db(),
-
+cet_write_local_doc(Db1) ->
     ?assertEqual(0, couch_db_engine:get_doc_count(Db1)),
     ?assertEqual(0, couch_db_engine:get_del_doc_count(Db1)),
     ?assertEqual(0, couch_db_engine:get_update_seq(Db1)),
@@ -232,9 +226,9 @@ cet_write_local_doc() ->
     Actions = [
         {create, {<<"_local/foo">>, {[{<<"yay">>, false}]}}}
     ],
-    {ok, Db2} = test_engine_util:apply_actions(Db1, Actions),
+    {ok, Db2} = cet_util:apply_actions(Db1, Actions),
     {ok, _} = couch_db:ensure_full_commit(Db2),
-    test_engine_util:shutdown_db(Db2),
+    cet_util:shutdown_db(Db2),
 
     {ok, Db3} = couch_db:reopen(Db2),
 
@@ -247,9 +241,7 @@ cet_write_local_doc() ->
     ?assertEqual({[{<<"yay">>, false}]}, Doc#doc.body).
 
 
-cet_write_mixed_batch() ->
-    {ok, Db1} = test_engine_util:create_db(),
-
+cet_write_mixed_batch(Db1) ->
     ?assertEqual(0, couch_db_engine:get_doc_count(Db1)),
     ?assertEqual(0, couch_db_engine:get_del_doc_count(Db1)),
     ?assertEqual(0, couch_db_engine:get_update_seq(Db1)),
@@ -260,9 +252,9 @@ cet_write_mixed_batch() ->
             {create, {<<"_local/foo">>, {[{<<"yay">>, false}]}}}
         ]}
     ],
-    {ok, Db2} = test_engine_util:apply_actions(Db1, Actions),
+    {ok, Db2} = cet_util:apply_actions(Db1, Actions),
     {ok, _} = couch_db:ensure_full_commit(Db2),
-    test_engine_util:shutdown_db(Db2),
+    cet_util:shutdown_db(Db2),
 
     {ok, Db3} = couch_db:reopen(Db2),
 
@@ -277,9 +269,7 @@ cet_write_mixed_batch() ->
     [#doc{}] = couch_db_engine:open_local_docs(Db3, [<<"_local/foo">>]).
 
 
-cet_update_local_doc() ->
-    {ok, Db1} = test_engine_util:create_db(),
-
+cet_update_local_doc(Db1) ->
     ?assertEqual(0, couch_db_engine:get_doc_count(Db1)),
     ?assertEqual(0, couch_db_engine:get_del_doc_count(Db1)),
     ?assertEqual(0, couch_db_engine:get_update_seq(Db1)),
@@ -288,9 +278,9 @@ cet_update_local_doc() ->
         {create, {<<"_local/foo">>, {[]}}},
         {update, {<<"_local/foo">>, {[{<<"stuff">>, null}]}}}
     ],
-    {ok, Db2} = test_engine_util:apply_actions(Db1, Actions),
+    {ok, Db2} = cet_util:apply_actions(Db1, Actions),
     {ok, _} = couch_db:ensure_full_commit(Db1),
-    test_engine_util:shutdown_db(Db2),
+    cet_util:shutdown_db(Db2),
 
     {ok, Db3} = couch_db:reopen(Db2),
 
@@ -303,9 +293,7 @@ cet_update_local_doc() ->
     ?assertEqual({[{<<"stuff">>, null}]}, Doc#doc.body).
 
 
-cet_delete_local_doc() ->
-    {ok, Db1} = test_engine_util:create_db(),
-
+cet_delete_local_doc(Db1) ->
     ?assertEqual(0, couch_db_engine:get_doc_count(Db1)),
     ?assertEqual(0, couch_db_engine:get_del_doc_count(Db1)),
     ?assertEqual(0, couch_db_engine:get_update_seq(Db1)),
@@ -314,9 +302,9 @@ cet_delete_local_doc() ->
         {create, {<<"_local/foo">>, []}},
         {delete, {<<"_local/foo">>, []}}
     ],
-    {ok, Db2} = test_engine_util:apply_actions(Db1, Actions),
+    {ok, Db2} = cet_util:apply_actions(Db1, Actions),
     {ok, _} = couch_db:ensure_full_commit(Db2),
-    test_engine_util:shutdown_db(Db2),
+    cet_util:shutdown_db(Db2),
 
     {ok, Db3} = couch_db:reopen(Db2),
 

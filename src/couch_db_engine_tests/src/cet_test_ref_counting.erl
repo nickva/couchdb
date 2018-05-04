@@ -10,8 +10,9 @@
 % License for the specific language governing permissions and limitations under
 % the License.
 
--module(test_engine_ref_counting).
+-module(cet_test_ref_counting).
 -compile(export_all).
+-compile(nowarn_export_all).
 
 
 -include_lib("eunit/include/eunit.hrl").
@@ -22,7 +23,7 @@
 
 
 cet_empty_monitors() ->
-    {ok, Db} = test_engine_util:create_db(),
+    {ok, Db} = cet_util:create_db(),
     Pids = couch_db_engine:monitored_by(Db),
     ?assert(is_list(Pids)),
     Expected = [
@@ -34,7 +35,7 @@ cet_empty_monitors() ->
 
 
 cet_incref_decref() ->
-    {ok, Db} = test_engine_util:create_db(),
+    {ok, Db} = cet_util:create_db(),
 
     {Pid, _} = Client = start_client(Db),
     wait_client(Client),
@@ -49,7 +50,7 @@ cet_incref_decref() ->
 
 
 cet_incref_decref_many() ->
-    {ok, Db} = test_engine_util:create_db(),
+    {ok, Db} = cet_util:create_db(),
     Clients = lists:map(fun(_) ->
         start_client(Db)
     end, lists:seq(1, ?NUM_CLIENTS)),

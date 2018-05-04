@@ -10,21 +10,29 @@
 % License for the specific language governing permissions and limitations under
 % the License.
 
--module(test_engine_attachments).
+-module(cet_test_attachments).
 -compile(export_all).
+-compile(nowarn_export_all).
 
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("couch/include/couch_db.hrl").
 
 
-cet_write_attachment() ->
-    {ok, Db1} = test_engine_util:create_db(),
+setup_test() ->
+    {ok, Db} = cet_util:create_db(),
+    Db.
 
+
+teardown_test(Db) ->
+    ok = couch_server:delete(couch_db:name(Db), []).
+
+
+cet_write_attachment(Db1) ->
     AttBin = crypto:strong_rand_bytes(32768),
 
     try
-        [Att0] = test_engine_util:prep_atts(Db1, [
+        [Att0] = cet_util:prep_atts(Db1, [
                 {<<"ohai.txt">>, AttBin}
             ]),
 
@@ -32,9 +40,9 @@ cet_write_attachment() ->
         ?assertEqual(true, couch_db_engine:is_active_stream(Db1, Stream)),
 
         Actions = [{create, {<<"first">>, {[]}, [Att0]}}],
-        {ok, Db2} = test_engine_util:apply_actions(Db1, Actions),
+        {ok, Db2} = cet_util:apply_actions(Db1, Actions),
         {ok, _} = couch_db:ensure_full_commit(Db2),
-        test_engine_util:shutdown_db(Db2),
+        cet_util:shutdown_db(Db2),
 
         {ok, Db3} = couch_db:reopen(Db2),
 
@@ -44,7 +52,7 @@ cet_write_attachment() ->
             rev = {RevPos, PrevRevId},
             deleted = Deleted,
             body_sp = DocPtr
-        } = test_engine_util:prev_rev(FDI),
+        } = cet_util:prev_rev(FDI),
 
         Doc0 = #doc{
             id = <<"foo">>,
@@ -72,20 +80,18 @@ cet_write_attachment() ->
 % attachments streams when restarting (for instance if
 % we ever have something that stores attachemnts in
 % an external object store)
-cet_inactive_stream() ->
-    {ok, Db1} = test_engine_util:create_db(),
-
+cet_inactive_stream(Db1) ->
     AttBin = crypto:strong_rand_bytes(32768),
 
     try
-        [Att0] = test_engine_util:prep_atts(Db1, [
+        [Att0] = cet_util:prep_atts(Db1, [
                 {<<"ohai.txt">>, AttBin}
             ]),
 
         {stream, Stream} = couch_att:fetch(data, Att0),
         ?assertEqual(true, couch_db_engine:is_active_stream(Db1, Stream)),
 
-        test_engine_util:shutdown_db(Db1),
+        cet_util:shutdown_db(Db1),
         {ok, Db2} = couch_db:reopen(Db1),
 
         ?assertEqual(false, couch_db_engine:is_active_stream(Db2, Stream))

@@ -10,8 +10,9 @@
 % License for the specific language governing permissions and limitations under
 % the License.
 
--module(test_engine_purge_replication).
+-module(cet_test_purge_replication).
 -compile(export_all).
+-compile(nowarn_export_all).
 
 
 -include_lib("eunit/include/eunit.hrl").
@@ -19,43 +20,39 @@
 -include_lib("mem3/include/mem3.hrl").
 
 
+setup_mod() ->
+    cet_util:setup_mod([mem3, fabric]).
+
+
 cet_purge_repl_disabled() ->
-    config:set("mem3", "replicate_purges", "false", false),
-    try
-        do_repl_disabled()
-    after
-        config:set("mem3", "replicate_purges", "true", false)
-    end.
+    cet_util:with_config([{"mem3", "replicate_purges", "false"}], fun() ->
+        {ok, SrcDb, TgtDb} = create_db_pair(),
+        repl(SrcDb, TgtDb),
 
+        Actions1 = [
+            {create, {<<"foo1">>, {[{<<"vsn">>, 1}]}}},
+            {create, {<<"foo2">>, {[{<<"vsn">>, 2}]}}}
+        ],
+        ok = cet_util:apply_actions(SrcDb, Actions1),
+        repl(SrcDb, TgtDb),
 
-do_repl_disabled() ->
-    {ok, SrcDb, TgtDb} = create_db_pair(),
-    repl(SrcDb, TgtDb),
+        Actions2 = [
+            {purge, {<<"foo1">>, prev_rev(SrcDb, <<"foo1">>)}}
+        ],
+        ok = cet_util:apply_actions(SrcDb, Actions2),
 
-    Actions1 = [
-        {create, {<<"foo1">>, {[{<<"vsn">>, 1}]}}},
-        {create, {<<"foo2">>, {[{<<"vsn">>, 2}]}}}
-    ],
-    ok = test_engine_util:apply_actions(SrcDb, Actions1),
-    repl(SrcDb, TgtDb),
+        Actions3 = [
+            {purge, {<<"foo2">>, prev_rev(TgtDb, <<"foo2">>)}}
+        ],
+        ok = cet_util:apply_actions(TgtDb, Actions3),
 
-    Actions2 = [
-        {purge, {<<"foo1">>, prev_rev(SrcDb, <<"foo1">>)}}
-    ],
-    ok = test_engine_util:apply_actions(SrcDb, Actions2),
+        SrcShard = make_shard(SrcDb),
+        TgtShard = make_shard(TgtDb),
+        ?assertEqual({ok, 0}, mem3_rep:go(SrcShard, TgtShard)),
 
-    Actions3 = [
-        {purge, {<<"foo2">>, prev_rev(TgtDb, <<"foo2">>)}}
-    ],
-    ok = test_engine_util:apply_actions(TgtDb, Actions3),
-
-
-    SrcShard = make_shard(SrcDb),
-    TgtShard = make_shard(TgtDb),
-    ?assertEqual({ok, 0}, mem3_rep:go(SrcShard, TgtShard)),
-
-    ?assertMatch([#full_doc_info{}], open_docs(SrcDb, [<<"foo2">>])),
-    ?assertMatch([#full_doc_info{}], open_docs(TgtDb, [<<"foo1">>])).
+        ?assertMatch([#full_doc_info{}], open_docs(SrcDb, [<<"foo2">>])),
+        ?assertMatch([#full_doc_info{}], open_docs(TgtDb, [<<"foo1">>]))
+    end).
 
 
 cet_purge_repl_simple_pull() ->
@@ -65,13 +62,13 @@ cet_purge_repl_simple_pull() ->
     Actions1 = [
         {create, {<<"foo">>, {[{<<"vsn">>, 1}]}}}
     ],
-    ok = test_engine_util:apply_actions(SrcDb, Actions1),
+    ok = cet_util:apply_actions(SrcDb, Actions1),
     repl(SrcDb, TgtDb),
 
     Actions2 = [
         {purge, {<<"foo">>, prev_rev(TgtDb, <<"foo">>)}}
     ],
-    ok = test_engine_util:apply_actions(TgtDb, Actions2),
+    ok = cet_util:apply_actions(TgtDb, Actions2),
     repl(SrcDb, TgtDb).
 
 
@@ -82,19 +79,19 @@ cet_purge_repl_simple_push() ->
     Actions1 = [
         {create, {<<"foo">>, {[{<<"vsn">>, 1}]}}}
     ],
-    ok = test_engine_util:apply_actions(SrcDb, Actions1),
+    ok = cet_util:apply_actions(SrcDb, Actions1),
     repl(SrcDb, TgtDb),
 
     Actions2 = [
         {purge, {<<"foo">>, prev_rev(SrcDb, <<"foo">>)}}
     ],
-    ok = test_engine_util:apply_actions(SrcDb, Actions2),
+    ok = cet_util:apply_actions(SrcDb, Actions2),
     repl(SrcDb, TgtDb).
 
 
 create_db_pair() ->
-    {ok, SrcDb} = test_engine_util:create_db(),
-    {ok, TgtDb} = test_engine_util:create_db(),
+    {ok, SrcDb} = cet_util:create_db(),
+    {ok, TgtDb} = cet_util:create_db(),
     try
         {ok, couch_db:name(SrcDb), couch_db:name(TgtDb)}
     after
@@ -109,9 +106,9 @@ repl(SrcDb, TgtDb) ->
 
     ?assertEqual({ok, 0}, mem3_rep:go(SrcShard, TgtShard)),
 
-    SrcTerm = test_engine_util:db_as_term(SrcDb, replication),
-    TgtTerm = test_engine_util:db_as_term(TgtDb, replication),
-    Diff = test_engine_util:term_diff(SrcTerm, TgtTerm),
+    SrcTerm = cet_util:db_as_term(SrcDb, replication),
+    TgtTerm = cet_util:db_as_term(TgtDb, replication),
+    Diff = cet_util:term_diff(SrcTerm, TgtTerm),
     ?assertEqual(nodiff, Diff).
 
 
@@ -135,5 +132,5 @@ open_docs(DbName, DocIds) ->
 
 prev_rev(DbName, DocId) ->
     [FDI] = open_docs(DbName, [DocId]),
-    PrevRev = test_engine_util:prev_rev(FDI),
+    PrevRev = cet_util:prev_rev(FDI),
     PrevRev#rev_info.rev.

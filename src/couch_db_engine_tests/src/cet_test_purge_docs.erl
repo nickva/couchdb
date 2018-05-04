@@ -10,21 +10,29 @@
 % License for the specific language governing permissions and limitations under
 % the License.
 
--module(test_engine_purge_docs).
+-module(cet_test_purge_docs).
 -compile(export_all).
+-compile(nowarn_export_all).
 
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("couch/include/couch_db.hrl").
 
 
-cet_purge_simple() ->
-    {ok, Db1} = test_engine_util:create_db(),
+setup_test() ->
+    {ok, Db} = cet_util:create_db(),
+    Db.
 
+
+teardown_test(Db) ->
+    ok = couch_server:delete(couch_db:name(Db), []).
+
+
+cet_purge_simple(Db1) ->
     Actions1 = [
         {create, {<<"foo">>, {[{<<"vsn">>, 1}]}}}
     ],
-    {ok, Db2} = test_engine_util:apply_actions(Db1, Actions1),
+    {ok, Db2} = cet_util:apply_actions(Db1, Actions1),
     {ok, PIdRevs2} = couch_db_engine:fold_purge_infos(
             Db2, 0, fun fold_fun/2, [], []),
 
@@ -35,13 +43,13 @@ cet_purge_simple() ->
     ?assertEqual([], PIdRevs2),
 
     [FDI] = couch_db_engine:open_docs(Db2, [<<"foo">>]),
-    PrevRev = test_engine_util:prev_rev(FDI),
+    PrevRev = cet_util:prev_rev(FDI),
     Rev = PrevRev#rev_info.rev,
 
     Actions2 = [
         {purge, {<<"foo">>, Rev}}
     ],
-    {ok, Db3} = test_engine_util:apply_actions(Db2, Actions2),
+    {ok, Db3} = cet_util:apply_actions(Db2, Actions2),
     {ok, PIdRevs3} = couch_db_engine:fold_purge_infos(
             Db3, 0, fun fold_fun/2, [], []),
 
@@ -52,13 +60,11 @@ cet_purge_simple() ->
     ?assertEqual([{<<"foo">>, [Rev]}], PIdRevs3).
 
 
-cet_purge_UUID() ->
-    {ok, Db1} = test_engine_util:create_db(),
-
+cet_purge_UUID(Db1) ->
     Actions1 = [
         {create, {<<"foo">>, {[{<<"vsn">>, 1}]}}}
     ],
-    {ok, Db2} = test_engine_util:apply_actions(Db1, Actions1),
+    {ok, Db2} = cet_util:apply_actions(Db1, Actions1),
     {ok, PIdRevs2} = couch_db_engine:fold_purge_infos(
             Db2, 0, fun fold_fun/2, [], []),
 
@@ -69,13 +75,13 @@ cet_purge_UUID() ->
     ?assertEqual([], PIdRevs2),
 
     [FDI] = couch_db_engine:open_docs(Db2, [<<"foo">>]),
-    PrevRev = test_engine_util:prev_rev(FDI),
+    PrevRev = cet_util:prev_rev(FDI),
     Rev = PrevRev#rev_info.rev,
 
     Actions2 = [
         {purge, {<<"foo">>, Rev}}
     ],
-    {ok, Db3} = test_engine_util:apply_actions(Db2, Actions2),
+    {ok, Db3} = cet_util:apply_actions(Db2, Actions2),
     {ok, PIdRevs3} = couch_db_engine:fold_purge_infos(
             Db3, 0, fun fold_fun/2, [], []),
 
@@ -91,14 +97,12 @@ cet_purge_UUID() ->
     ?assert(is_binary(UUID)).
 
 
-cet_purge_conflicts() ->
-    {ok, Db1} = test_engine_util:create_db(),
-
+cet_purge_conflicts(Db1) ->
     Actions1 = [
         {create, {<<"foo">>, {[{<<"vsn">>, 1}]}}},
         {conflict, {<<"foo">>, {[{<<"vsn">>, 2}]}}}
     ],
-    {ok, Db2} = test_engine_util:apply_actions(Db1, Actions1),
+    {ok, Db2} = cet_util:apply_actions(Db1, Actions1),
     {ok, PIdRevs2} = couch_db_engine:fold_purge_infos(
             Db2, 0, fun fold_fun/2, [], []),
 
@@ -109,13 +113,13 @@ cet_purge_conflicts() ->
     ?assertEqual([], PIdRevs2),
 
     [FDI1] = couch_db_engine:open_docs(Db2, [<<"foo">>]),
-    PrevRev1 = test_engine_util:prev_rev(FDI1),
+    PrevRev1 = cet_util:prev_rev(FDI1),
     Rev1 = PrevRev1#rev_info.rev,
 
     Actions2 = [
         {purge, {<<"foo">>, Rev1}}
     ],
-    {ok, Db3} = test_engine_util:apply_actions(Db2, Actions2),
+    {ok, Db3} = cet_util:apply_actions(Db2, Actions2),
     {ok, PIdRevs3} = couch_db_engine:fold_purge_infos(
             Db3, 0, fun fold_fun/2, [], []),
 
@@ -126,13 +130,13 @@ cet_purge_conflicts() ->
     ?assertEqual([{<<"foo">>, [Rev1]}], PIdRevs3),
 
     [FDI2] = couch_db_engine:open_docs(Db3, [<<"foo">>]),
-    PrevRev2 = test_engine_util:prev_rev(FDI2),
+    PrevRev2 = cet_util:prev_rev(FDI2),
     Rev2 = PrevRev2#rev_info.rev,
 
     Actions3 = [
         {purge, {<<"foo">>, Rev2}}
     ],
-    {ok, Db4} = test_engine_util:apply_actions(Db3, Actions3),
+    {ok, Db4} = cet_util:apply_actions(Db3, Actions3),
     {ok, PIdRevs4} = couch_db_engine:fold_purge_infos(
             Db4, 0, fun fold_fun/2, [], []),
 
@@ -143,15 +147,13 @@ cet_purge_conflicts() ->
     ?assertEqual([{<<"foo">>, [Rev2]}, {<<"foo">>, [Rev1]}], PIdRevs4).
 
 
-cet_add_delete_purge() ->
-    {ok, Db1} = test_engine_util:create_db(),
-
+cet_add_delete_purge(Db1) ->
     Actions1 = [
         {create, {<<"foo">>, {[{<<"vsn">>, 1}]}}},
         {delete, {<<"foo">>, {[{<<"vsn">>, 2}]}}}
     ],
 
-    {ok, Db2} = test_engine_util:apply_actions(Db1, Actions1),
+    {ok, Db2} = cet_util:apply_actions(Db1, Actions1),
     {ok, PIdRevs2} = couch_db_engine:fold_purge_infos(
             Db2, 0, fun fold_fun/2, [], []),
 
@@ -162,13 +164,13 @@ cet_add_delete_purge() ->
     ?assertEqual([], PIdRevs2),
 
     [FDI] = couch_db_engine:open_docs(Db2, [<<"foo">>]),
-    PrevRev = test_engine_util:prev_rev(FDI),
+    PrevRev = cet_util:prev_rev(FDI),
     Rev = PrevRev#rev_info.rev,
 
     Actions2 = [
         {purge, {<<"foo">>, Rev}}
     ],
-    {ok, Db3} = test_engine_util:apply_actions(Db2, Actions2),
+    {ok, Db3} = cet_util:apply_actions(Db2, Actions2),
     {ok, PIdRevs3} = couch_db_engine:fold_purge_infos(
             Db3, 0, fun fold_fun/2, [], []),
 
@@ -179,15 +181,13 @@ cet_add_delete_purge() ->
     ?assertEqual([{<<"foo">>, [Rev]}], PIdRevs3).
 
 
-cet_add_two_purge_one() ->
-    {ok, Db1} = test_engine_util:create_db(),
-
+cet_add_two_purge_one(Db1) ->
     Actions1 = [
         {create, {<<"foo">>, {[{<<"vsn">>, 1}]}}},
         {create, {<<"bar">>, {[]}}}
     ],
 
-    {ok, Db2} = test_engine_util:apply_actions(Db1, Actions1),
+    {ok, Db2} = cet_util:apply_actions(Db1, Actions1),
     {ok, PIdRevs2} = couch_db_engine:fold_purge_infos(
             Db2, 0, fun fold_fun/2, [], []),
 
@@ -198,13 +198,13 @@ cet_add_two_purge_one() ->
     ?assertEqual([], PIdRevs2),
 
     [FDI] = couch_db_engine:open_docs(Db2, [<<"foo">>]),
-    PrevRev = test_engine_util:prev_rev(FDI),
+    PrevRev = cet_util:prev_rev(FDI),
     Rev = PrevRev#rev_info.rev,
 
     Actions2 = [
         {purge, {<<"foo">>, Rev}}
     ],
-    {ok, Db3} = test_engine_util:apply_actions(Db2, Actions2),
+    {ok, Db3} = cet_util:apply_actions(Db2, Actions2),
     {ok, PIdRevs3} = couch_db_engine:fold_purge_infos(
             Db3, 0, fun fold_fun/2, [], []),
 

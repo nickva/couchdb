@@ -12,23 +12,24 @@
 
 -module(cet_util).
 -compile(export_all).
+-compile(nowarn_export_all).
 
 
 -include_lib("couch/include/couch_db.hrl").
 
 
 -define(TEST_MODULES, [
-    %% cet_open_close_delete,
-    %% cet_get_set_props,
-    %% cet_read_write_docs,
-    %% cet_attachments,
-    %% cet_fold_docs,
-    %% cet_fold_changes,
-    %% cet_fold_purge_infos,
-    %% cet_purge_docs,
-    cet_purge_replication
-    %% cet_compaction,
-    %% cet_ref_counting
+    cet_test_open_close_delete,
+    cet_test_get_set_props,
+    cet_test_read_write_docs,
+    cet_test_attachments,
+    cet_test_purge_docs,
+    cet_test_fold_docs,
+    cet_test_fold_changes,
+    cet_test_fold_purge_infos,
+    cet_test_compaction,
+    cet_test_purge_replication,
+    cet_test_ref_counting
 ]).
 
 
@@ -45,46 +46,27 @@ create_tests(EngineApp, Extension) ->
 create_tests(EngineApp, EngineModule, Extension) ->
     TestEngine = {EngineApp, EngineModule, Extension},
     application:set_env(couch, test_engine, TestEngine),
-    Tests = lists:map(fun(TestMod) ->
-        {atom_to_list(TestMod), gather(TestMod)}
-    end, ?TEST_MODULES),
-    Setup = fun() ->
-        Ctx = test_util:start_couch([mem3, fabric]),
-        EngineModStr = atom_to_list(EngineModule),
-        config:set("couchdb_engines", Extension, EngineModStr, false),
-        config:set("log", "include_sasl", "false", false),
-        config:set("mem3", "replicate_purges", "true", false),
-        Ctx
-    end,
-    {
-        setup,
-        Setup,
-        fun test_util:stop_couch/1,
-        fun(_) -> Tests end
-    }.
+    lists:map(fun(TestMod) ->
+        {atom_to_list(TestMod), cet_gather:module(TestMod)}
+    end, ?TEST_MODULES).
 
 
-gather(Module) ->
-    Exports = Module:module_info(exports),
-    Tests = lists:foldl(fun({Fun, Arity}, Acc) ->
-        case {atom_to_list(Fun), Arity} of
-            {[$c, $e, $t, $_ | _], 0} ->
-                TestFun = make_test_fun(Module, Fun),
-                [{timeout, 60, {spawn, TestFun}} | Acc];
-            _ ->
-                Acc
-        end
-    end, [], Exports),
-    lists:reverse(Tests).
+setup_mod() ->
+    setup_mod([]).
 
 
-make_test_fun(Module, Fun) ->
-    Name = lists:flatten(io_lib:format("~s:~s", [Module, Fun])),
-    Wrapper = fun() ->
-        process_flag(trap_exit, true),
-        Module:Fun()
-    end,
-    {Name, Wrapper}.
+setup_mod(ExtraApps) ->
+    Ctx = test_util:start_couch(ExtraApps),
+    {ok, {_, EngineMod, Extension}} = application:get_env(couch, test_engine),
+    EngineModStr = atom_to_list(EngineMod),
+    config:set("couchdb_engines", Extension, EngineModStr, false),
+    config:set("log", "include_sasl", "false", false),
+    config:set("mem3", "replicate_purges", "true", false),
+    Ctx.
+
+
+teardown_mod(Ctx) ->
+    test_util:stop_couch(Ctx).
 
 
 rootdir() ->

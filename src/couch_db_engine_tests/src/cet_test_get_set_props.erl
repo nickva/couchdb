@@ -10,8 +10,9 @@
 % License for the specific language governing permissions and limitations under
 % the License.
 
--module(test_engine_get_set_props).
+-module(cet_test_get_set_props).
 -compile(export_all).
+-compile(nowarn_export_all).
 
 
 -include_lib("eunit/include/eunit.hrl").
@@ -19,7 +20,7 @@
 
 cet_default_props() ->
     {ok, {_App, Engine, _Extension}} = application:get_env(couch, test_engine),
-    {ok, Db} = test_engine_util:create_db(),
+    {ok, Db} = cet_util:create_db(),
     Node = node(),
 
     ?assertEqual(Engine, couch_db_engine:get_engine(Db)),
@@ -50,12 +51,12 @@ cet_default_props() ->
 
 cet_admin_only_security() ->
     Config = [{"couchdb", "default_security", "admin_only"}],
-    {ok, Db1} = test_engine_util:with_config(Config, fun() ->
-        test_engine_util:create_db()
+    {ok, Db1} = cet_util:with_config(Config, fun() ->
+        cet_util:create_db()
     end),
 
     ?assertEqual(?ADMIN_ONLY_SEC_PROPS, couch_db:get_security(Db1)),
-    test_engine_util:shutdown_db(Db1),
+    cet_util:shutdown_db(Db1),
 
     {ok, Db2} = couch_db:reopen(Db1),
     couch_log:error("~n~n~n~n~s -> ~s~n~n", [couch_db:name(Db1), couch_db:name(Db2)]),
@@ -72,7 +73,7 @@ cet_set_revs_limit() ->
 
 
 check_prop_set(GetFun, SetFun, Default, Value) ->
-    {ok, Db0} = test_engine_util:create_db(),
+    {ok, Db0} = cet_util:create_db(),
 
     ?assertEqual(Default, couch_db:GetFun(Db0)),
     ?assertMatch(ok, couch_db:SetFun(Db0, Value)),
@@ -81,7 +82,7 @@ check_prop_set(GetFun, SetFun, Default, Value) ->
     ?assertEqual(Value, couch_db:GetFun(Db1)),
 
     ?assertMatch({ok, _}, couch_db:ensure_full_commit(Db1)),
-    test_engine_util:shutdown_db(Db1),
+    cet_util:shutdown_db(Db1),
 
     {ok, Db2} = couch_db:reopen(Db1),
     ?assertEqual(Value, couch_db:GetFun(Db2)).

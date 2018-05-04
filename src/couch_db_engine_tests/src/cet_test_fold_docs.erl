@@ -10,8 +10,9 @@
 % License for the specific language governing permissions and limitations under
 % the License.
 
--module(test_engine_fold_docs).
+-module(cet_test_fold_docs).
 -compile(export_all).
+-compile(nowarn_export_all).
 
 
 -include_lib("eunit/include/eunit.hrl").
@@ -21,59 +22,67 @@
 -define(NUM_DOCS, 100).
 
 
-cet_fold_all() ->
-    fold_all(fold_docs, fun docid/1).
+setup_test() ->
+    cet_util:dbname().
 
 
-cet_fold_all_local() ->
-    fold_all(fold_local_docs, fun local_docid/1).
+teardown_test(DbName) ->
+    ok = couch_server:delete(DbName, []).
 
 
-cet_fold_start_key() ->
-    fold_start_key(fold_docs, fun docid/1).
+cet_fold_all(DbName) ->
+    fold_all(DbName, fold_docs, fun docid/1).
 
 
-cet_fold_start_key_local() ->
-    fold_start_key(fold_local_docs, fun local_docid/1).
+cet_fold_all_local(DbName) ->
+    fold_all(DbName, fold_local_docs, fun local_docid/1).
 
 
-cet_fold_end_key() ->
-    fold_end_key(fold_docs, fun docid/1).
+cet_fold_start_key(DbName) ->
+    fold_start_key(DbName, fold_docs, fun docid/1).
 
 
-cet_fold_end_key_local() ->
-    fold_end_key(fold_local_docs, fun local_docid/1).
+cet_fold_start_key_local(DbName) ->
+    fold_start_key(DbName, fold_local_docs, fun local_docid/1).
 
 
-cet_fold_end_key_gt() ->
-    fold_end_key_gt(fold_docs, fun docid/1).
+cet_fold_end_key(DbName) ->
+    fold_end_key(DbName, fold_docs, fun docid/1).
 
 
-cet_fold_end_key_gt_local() ->
-    fold_end_key_gt(fold_local_docs, fun local_docid/1).
+cet_fold_end_key_local(DbName) ->
+    fold_end_key(DbName, fold_local_docs, fun local_docid/1).
 
 
-cet_fold_range() ->
-    fold_range(fold_docs, fun docid/1).
+cet_fold_end_key_gt(DbName) ->
+    fold_end_key_gt(DbName, fold_docs, fun docid/1).
 
 
-cet_fold_range_local() ->
-    fold_range(fold_local_docs, fun local_docid/1).
+cet_fold_end_key_gt_local(DbName) ->
+    fold_end_key_gt(DbName, fold_local_docs, fun local_docid/1).
 
 
-cet_fold_stop() ->
-    fold_user_fun_stop(fold_docs, fun docid/1).
+cet_fold_range(DbName) ->
+    fold_range(DbName, fold_docs, fun docid/1).
 
 
-cet_fold_stop_local() ->
-    fold_user_fun_stop(fold_local_docs, fun local_docid/1).
+cet_fold_range_local(DbName) ->
+    fold_range(DbName, fold_local_docs, fun local_docid/1).
+
+
+cet_fold_stop(DbName) ->
+    fold_user_fun_stop(DbName, fold_docs, fun docid/1).
+
+
+cet_fold_stop_local(DbName) ->
+    fold_user_fun_stop(DbName, fold_local_docs, fun local_docid/1).
 
 
 % This is a loose test but we have to have this until
 % I figure out what to do about the total_rows/offset
 % meta data included in _all_docs
-cet_fold_include_reductions() ->
-    {ok, Db} = init_st(fun docid/1),
+cet_fold_include_reductions(DbName) ->
+    {ok, Db} = init_st(DbName, fun docid/1),
     FoldFun = fun(_, _, nil) -> {ok, nil} end,
     Opts = [include_reductions],
     {ok, Count, nil} = couch_db_engine:fold_docs(Db, FoldFun, nil, Opts),
@@ -81,9 +90,9 @@ cet_fold_include_reductions() ->
     ?assert(Count >= 0).
 
 
-fold_all(FoldFun, DocIdFun) ->
+fold_all(DbName, FoldFun, DocIdFun) ->
     DocIds = [DocIdFun(I) || I <- lists:seq(1, ?NUM_DOCS)],
-    {ok, Db} = init_st(DocIdFun),
+    {ok, Db} = init_st(DbName, DocIdFun),
 
     {ok, DocIdAccFwd} = couch_db_engine:FoldFun(Db, fun fold_fun/2, [], []),
     ?assertEqual(?NUM_DOCS, length(DocIdAccFwd)),
@@ -95,8 +104,8 @@ fold_all(FoldFun, DocIdFun) ->
     ?assertEqual(DocIds, DocIdAccRev).
 
 
-fold_start_key(FoldFun, DocIdFun) ->
-    {ok, Db} = init_st(DocIdFun),
+fold_start_key(DbName, FoldFun, DocIdFun) ->
+    {ok, Db} = init_st(DbName, DocIdFun),
 
     StartKeyNum = ?NUM_DOCS div 4,
     StartKey = DocIdFun(StartKeyNum),
@@ -141,8 +150,8 @@ fold_start_key(FoldFun, DocIdFun) ->
     ?assertEqual(DocIdsRev, DocIdAccRev).
 
 
-fold_end_key(FoldFun, DocIdFun) ->
-    {ok, Db} = init_st(DocIdFun),
+fold_end_key(DbName, FoldFun, DocIdFun) ->
+    {ok, Db} = init_st(DbName, DocIdFun),
 
     EndKeyNum = ?NUM_DOCS div 4,
     EndKey = DocIdFun(EndKeyNum),
@@ -189,8 +198,8 @@ fold_end_key(FoldFun, DocIdFun) ->
     ?assertEqual(DocIdsRev, DocIdAccRev).
 
 
-fold_end_key_gt(FoldFun, DocIdFun) ->
-    {ok, Db} = init_st(DocIdFun),
+fold_end_key_gt(DbName, FoldFun, DocIdFun) ->
+    {ok, Db} = init_st(DbName, DocIdFun),
 
     EndKeyNum = ?NUM_DOCS div 4,
     EndKey = DocIdFun(EndKeyNum),
@@ -237,8 +246,8 @@ fold_end_key_gt(FoldFun, DocIdFun) ->
     ?assertEqual(DocIdsRev, DocIdAccRev).
 
 
-fold_range(FoldFun, DocIdFun) ->
-    {ok, Db} = init_st(DocIdFun),
+fold_range(DbName, FoldFun, DocIdFun) ->
+    {ok, Db} = init_st(DbName, DocIdFun),
 
     StartKeyNum = ?NUM_DOCS div 4,
     EndKeyNum = StartKeyNum * 3,
@@ -300,8 +309,8 @@ fold_range(FoldFun, DocIdFun) ->
     ?assertEqual(DocIdsRev, DocIdAccRev).
 
 
-fold_user_fun_stop(FoldFun, DocIdFun) ->
-    {ok, Db} = init_st(DocIdFun),
+fold_user_fun_stop(DbName, FoldFun, DocIdFun) ->
+    {ok, Db} = init_st(DbName, DocIdFun),
 
     StartKeyNum = ?NUM_DOCS div 4,
     StartKey = DocIdFun(StartKeyNum),
@@ -352,12 +361,13 @@ fold_user_fun_stop(FoldFun, DocIdFun) ->
     ?assertEqual(FiveDocIdsRev, FiveDocIdAccRev).
 
 
-init_st(DocIdFun) ->
-    {ok, Db1} = test_engine_util:create_db(),
+init_st(DbName, DocIdFun) ->
+    {ok, Db1} = cet_util:create_db(DbName),
     Actions = lists:map(fun(Id) ->
         {create, {DocIdFun(Id), {[{<<"int">>, Id}]}}}
     end, lists:seq(1, ?NUM_DOCS)),
-    test_engine_util:apply_batch(Db1, Actions).
+    {ok, Db2} = cet_util:apply_actions(Db1, [{batch, Actions}]),
+    {ok, Db2}.
 
 
 fold_fun(Doc, Acc) ->

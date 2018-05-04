@@ -10,8 +10,9 @@
 % License for the specific language governing permissions and limitations under
 % the License.
 
--module(test_engine_fold_purge_infos).
+-module(cet_test_fold_purge_infos).
 -compile(export_all).
+-compile(nowarn_export_all).
 
 
 -include_lib("eunit/include/eunit.hrl").
@@ -21,15 +22,21 @@
 -define(NUM_DOCS, 100).
 
 
-cet_empty_purged_docs() ->
-    {ok, Db} = test_engine_util:create_db(),
+setup_test() ->
+    {ok, Db} = cet_util:create_db(),
+    Db.
+
+
+teardown_test(Db) ->
+    ok = couch_server:delete(couch_db:name(Db), []).
+
+
+cet_empty_purged_docs(Db) ->
     ?assertEqual({ok, []}, couch_db_engine:fold_purge_infos(
             Db, 0, fun fold_fun/2, [], [])).
 
 
-cet_all_purged_docs() ->
-    {ok, Db1} = test_engine_util:create_db(),
-
+cet_all_purged_docs(Db1) ->
     {RActions, RIds} = lists:foldl(fun(Id, {CActions, CIds}) ->
         Id1 = docid(Id),
         Action = {create, {Id1, {[{<<"int">>, Id}]}}},
@@ -37,26 +44,25 @@ cet_all_purged_docs() ->
      end, {[], []}, lists:seq(1, ?NUM_DOCS)),
     Actions = lists:reverse(RActions),
     Ids = lists:reverse(RIds),
-    {ok, Db2} = test_engine_util:apply_batch(Db1, Actions),
+    {ok, Db2} = cet_util:apply_batch(Db1, Actions),
 
     FDIs = couch_db_engine:open_docs(Db2, Ids),
     {RevActions2, RevIdRevs} = lists:foldl(fun(FDI, {CActions, CIdRevs}) ->
         Id = FDI#full_doc_info.id,
-        PrevRev = test_engine_util:prev_rev(FDI),
+        PrevRev = cet_util:prev_rev(FDI),
         Rev = PrevRev#rev_info.rev,
         Action = {purge, {Id, Rev}},
         {[Action| CActions], [{Id, [Rev]}| CIdRevs]}
      end, {[], []}, FDIs),
     {Actions2, IdsRevs} = {lists:reverse(RevActions2), lists:reverse(RevIdRevs)},
 
-    {ok, Db3} = test_engine_util:apply_batch(Db2, Actions2),
+    {ok, Db3} = cet_util:apply_batch(Db2, Actions2),
     {ok, PurgedIdRevs} = couch_db_engine:fold_purge_infos(
             Db3, 0, fun fold_fun/2, [], []),
     ?assertEqual(IdsRevs, lists:reverse(PurgedIdRevs)).
 
 
-cet_start_seq() ->
-    {ok, Db1} = test_engine_util:create_db(),
+cet_start_seq(Db1) ->
     Actions1 = [
         {create, {docid(1), {[{<<"int">>, 1}]}}},
         {create, {docid(2), {[{<<"int">>, 2}]}}},
@@ -65,17 +71,17 @@ cet_start_seq() ->
         {create, {docid(5), {[{<<"int">>, 5}]}}}
     ],
     Ids = [docid(1), docid(2), docid(3), docid(4), docid(5)],
-    {ok, Db2} = test_engine_util:apply_actions(Db1, Actions1),
+    {ok, Db2} = cet_util:apply_actions(Db1, Actions1),
 
     FDIs = couch_db_engine:open_docs(Db2, Ids),
     {RActions2, RIdRevs} = lists:foldl(fun(FDI, {CActions, CIdRevs}) ->
         Id = FDI#full_doc_info.id,
-        PrevRev = test_engine_util:prev_rev(FDI),
+        PrevRev = cet_util:prev_rev(FDI),
         Rev = PrevRev#rev_info.rev,
         Action = {purge, {Id, Rev}},
         {[Action| CActions], [{Id, [Rev]}| CIdRevs]}
     end, {[], []}, FDIs),
-    {ok, Db3} = test_engine_util:apply_actions(Db2, lists:reverse(RActions2)),
+    {ok, Db3} = cet_util:apply_actions(Db2, lists:reverse(RActions2)),
 
     StartSeq = 3,
     StartSeqIdRevs = lists:nthtail(StartSeq, lists:reverse(RIdRevs)),
@@ -84,23 +90,21 @@ cet_start_seq() ->
     ?assertEqual(StartSeqIdRevs, lists:reverse(PurgedIdRevs)).
 
 
-cet_id_rev_repeated() ->
-    {ok, Db1} = test_engine_util:create_db(),
-
+cet_id_rev_repeated(Db1) ->
     Actions1 = [
         {create, {<<"foo">>, {[{<<"vsn">>, 1}]}}},
         {conflict, {<<"foo">>, {[{<<"vsn">>, 2}]}}}
     ],
-    {ok, Db2} = test_engine_util:apply_actions(Db1, Actions1),
+    {ok, Db2} = cet_util:apply_actions(Db1, Actions1),
 
     [FDI1] = couch_db_engine:open_docs(Db2, [<<"foo">>]),
-    PrevRev1 = test_engine_util:prev_rev(FDI1),
+    PrevRev1 = cet_util:prev_rev(FDI1),
     Rev1 = PrevRev1#rev_info.rev,
     Actions2 = [
         {purge, {<<"foo">>, Rev1}}
     ],
 
-    {ok, Db3} = test_engine_util:apply_actions(Db2, Actions2),
+    {ok, Db3} = cet_util:apply_actions(Db2, Actions2),
     {ok, PurgedIdRevs1} = couch_db_engine:fold_purge_infos(
             Db3, 0, fun fold_fun/2, [], []),
     ExpectedPurgedIdRevs1 = [
@@ -111,7 +115,7 @@ cet_id_rev_repeated() ->
     ?assertEqual(1, couch_db_engine:get_purge_seq(Db3)),
 
     % purge the same Id,Rev when the doc still exists
-    {ok, Db4} = test_engine_util:apply_actions(Db3, Actions2),
+    {ok, Db4} = cet_util:apply_actions(Db3, Actions2),
     {ok, PurgedIdRevs2} = couch_db_engine:fold_purge_infos(
             Db4, 0, fun fold_fun/2, [], []),
     ExpectedPurgedIdRevs2 = [
@@ -122,12 +126,12 @@ cet_id_rev_repeated() ->
     ?assertEqual(2, couch_db_engine:get_purge_seq(Db4)),
 
     [FDI2] = couch_db_engine:open_docs(Db4, [<<"foo">>]),
-    PrevRev2 = test_engine_util:prev_rev(FDI2),
+    PrevRev2 = cet_util:prev_rev(FDI2),
     Rev2 = PrevRev2#rev_info.rev,
     Actions3 = [
         {purge, {<<"foo">>, Rev2}}
     ],
-    {ok, Db5} = test_engine_util:apply_actions(Db4, Actions3),
+    {ok, Db5} = cet_util:apply_actions(Db4, Actions3),
 
     {ok, PurgedIdRevs3} = couch_db_engine:fold_purge_infos(
             Db5, 0, fun fold_fun/2, [], []),
@@ -140,7 +144,7 @@ cet_id_rev_repeated() ->
     ?assertEqual(3, couch_db_engine:get_purge_seq(Db5)),
 
     % purge the same Id,Rev when the doc was completely purged
-    {ok, Db6} = test_engine_util:apply_actions(Db5, Actions3),
+    {ok, Db6} = cet_util:apply_actions(Db5, Actions3),
 
     {ok, PurgedIdRevs4} = couch_db_engine:fold_purge_infos(
             Db6, 0, fun fold_fun/2, [], []),

@@ -10,60 +10,54 @@
 % License for the specific language governing permissions and limitations under
 % the License.
 
--module(test_engine_open_close_delete).
+-module(cet_test_open_close_delete).
 -compile(export_all).
+-compile(nowarn_export_all).
 
 
 -include_lib("eunit/include/eunit.hrl").
 
 
-cet_open_non_existent() ->
+setup_test() ->
+    cet_util:dbname().
+
+
+cet_open_non_existent(DbName) ->
     % Try twice to check that a failed open doesn't create
     % the database for some reason.
-    DbName = test_engine_util:dbname(),
-    ?assertEqual({not_found, no_db_file}, test_engine_util:open_db(DbName)),
-    ?assertEqual({not_found, no_db_file}, test_engine_util:open_db(DbName)).
+    ?assertEqual({not_found, no_db_file}, cet_util:open_db(DbName)),
+    ?assertEqual({not_found, no_db_file}, cet_util:open_db(DbName)).
 
 
-cet_open_create() ->
-    DbName = test_engine_util:dbname(),
-
+cet_open_create(DbName) ->
     ?assertEqual(false, couch_server:exists(DbName)),
-    ?assertEqual({not_found, no_db_file}, test_engine_util:open_db(DbName)),
-    ?assertMatch({ok, _}, test_engine_util:create_db(DbName)),
+    ?assertEqual({not_found, no_db_file}, cet_util:open_db(DbName)),
+    ?assertMatch({ok, _}, cet_util:create_db(DbName)),
     ?assertEqual(true, couch_server:exists(DbName)).
 
 
-cet_open_when_exists() ->
-    DbName = test_engine_util:dbname(),
-
+cet_open_when_exists(DbName) ->
     ?assertEqual(false, couch_server:exists(DbName)),
-    ?assertEqual({not_found, no_db_file}, test_engine_util:open_db(DbName)),
-    ?assertMatch({ok, _}, test_engine_util:create_db(DbName)),
-    ?assertEqual(file_exists, test_engine_util:create_db(DbName)).
+    ?assertEqual({not_found, no_db_file}, cet_util:open_db(DbName)),
+    ?assertMatch({ok, _}, cet_util:create_db(DbName)),
+    ?assertEqual(file_exists, cet_util:create_db(DbName)).
 
 
-cet_terminate() ->
-    DbName = test_engine_util:dbname(),
-
+cet_terminate(DbName) ->
     ?assertEqual(false, couch_server:exists(DbName)),
-    ?assertEqual({not_found, no_db_file}, test_engine_util:open_db(DbName)),
+    ?assertEqual({not_found, no_db_file}, cet_util:open_db(DbName)),
     ?assertEqual(ok, cycle_db(DbName, create_db)),
     ?assertEqual(true, couch_server:exists(DbName)).
 
 
-cet_rapid_recycle() ->
-    DbName = test_engine_util:dbname(),
-
+cet_rapid_recycle(DbName) ->
     ?assertEqual(ok, cycle_db(DbName, create_db)),
     lists:foreach(fun(_) ->
         ?assertEqual(ok, cycle_db(DbName, open_db))
     end, lists:seq(1, 100)).
 
 
-cet_delete() ->
-    DbName = test_engine_util:dbname(),
-
+cet_delete(DbName) ->
     ?assertEqual(false, couch_server:exists(DbName)),
     ?assertMatch(ok, cycle_db(DbName, create_db)),
     ?assertEqual(true, couch_server:exists(DbName)),
@@ -72,5 +66,5 @@ cet_delete() ->
 
 
 cycle_db(DbName, Type) ->
-    {ok, Db} = test_engine_util:Type(DbName),
-    test_engine_util:shutdown_db(Db).
+    {ok, Db} = cet_util:Type(DbName),
+    cet_util:shutdown_db(Db).

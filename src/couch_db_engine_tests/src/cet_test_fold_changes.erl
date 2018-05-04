@@ -10,8 +10,9 @@
 % License for the specific language governing permissions and limitations under
 % the License.
 
--module(test_engine_fold_changes).
+-module(cet_test_fold_changes).
 -compile(export_all).
+-compile(nowarn_export_all).
 
 
 -include_lib("eunit/include/eunit.hrl").
@@ -21,30 +22,36 @@
 -define(NUM_DOCS, 25).
 
 
-cet_empty_changes() ->
-    {ok, Db} = test_engine_util:create_db(),
+setup_test() ->
+    {ok, Db} = cet_util:create_db(),
+    Db.
+
+
+teardown_test(Db) ->
+    ok = couch_server:delete(couch_db:name(Db), []).
+
+
+cet_empty_changes(Db) ->
     ?assertEqual(0, couch_db_engine:count_changes_since(Db, 0)),
     ?assertEqual({ok, []},
             couch_db_engine:fold_changes(Db, 0, fun fold_fun/2, [], [])).
 
 
-cet_single_change() ->
-    {ok, Db1} = test_engine_util:create_db(),
+cet_single_change(Db1) ->
     Actions = [{create, {<<"a">>, {[]}}}],
-    {ok, Db2} = test_engine_util:apply_actions(Db1, Actions),
+    {ok, Db2} = cet_util:apply_actions(Db1, Actions),
 
     ?assertEqual(1, couch_db_engine:count_changes_since(Db2, 0)),
     ?assertEqual({ok, [{<<"a">>, 1}]},
             couch_db_engine:fold_changes(Db2, 0, fun fold_fun/2, [], [])).
 
 
-cet_two_changes() ->
-    {ok, Db1} = test_engine_util:create_db(),
+cet_two_changes(Db1) ->
     Actions = [
         {create, {<<"a">>, {[]}}},
         {create, {<<"b">>, {[]}}}
     ],
-    {ok, Db2} = test_engine_util:apply_actions(Db1, Actions),
+    {ok, Db2} = cet_util:apply_actions(Db1, Actions),
 
     ?assertEqual(2, couch_db_engine:count_changes_since(Db2, 0)),
     {ok, Changes} =
@@ -52,29 +59,28 @@ cet_two_changes() ->
     ?assertEqual([{<<"a">>, 1}, {<<"b">>, 2}], lists:reverse(Changes)).
 
 
-cet_two_changes_batch() ->
-    {ok, Db1} = test_engine_util:create_db(),
+cet_two_changes_batch(Db1) ->
     Actions1 = [
         {batch, [
             {create, {<<"a">>, {[]}}},
             {create, {<<"b">>, {[]}}}
         ]}
     ],
-    {ok, Db2} = test_engine_util:apply_actions(Db1, Actions1),
+    {ok, Db2} = cet_util:apply_actions(Db1, Actions1),
 
     ?assertEqual(2, couch_db_engine:count_changes_since(Db2, 0)),
     {ok, Changes1} =
             couch_db_engine:fold_changes(Db2, 0, fun fold_fun/2, [], []),
     ?assertEqual([{<<"a">>, 1}, {<<"b">>, 2}], lists:reverse(Changes1)),
 
-    {ok, Db3} = test_engine_util:create_db(),
+    {ok, Db3} = cet_util:create_db(),
     Actions2 = [
         {batch, [
             {create, {<<"b">>, {[]}}},
             {create, {<<"a">>, {[]}}}
         ]}
     ],
-    {ok, Db4} = test_engine_util:apply_actions(Db3, Actions2),
+    {ok, Db4} = cet_util:apply_actions(Db3, Actions2),
 
     ?assertEqual(2, couch_db_engine:count_changes_since(Db4, 0)),
     {ok, Changes2} =
@@ -82,27 +88,25 @@ cet_two_changes_batch() ->
     ?assertEqual([{<<"a">>, 1}, {<<"b">>, 2}], lists:reverse(Changes2)).
 
 
-cet_update_one() ->
-    {ok, Db1} = test_engine_util:create_db(),
+cet_update_one(Db1) ->
     Actions = [
         {create, {<<"a">>, {[]}}},
         {update, {<<"a">>, {[]}}}
     ],
-    {ok, Db2} = test_engine_util:apply_actions(Db1, Actions),
+    {ok, Db2} = cet_util:apply_actions(Db1, Actions),
 
     ?assertEqual(1, couch_db_engine:count_changes_since(Db2, 0)),
     ?assertEqual({ok, [{<<"a">>, 2}]},
             couch_db_engine:fold_changes(Db2, 0, fun fold_fun/2, [], [])).
 
 
-cet_update_first_of_two() ->
-    {ok, Db1} = test_engine_util:create_db(),
+cet_update_first_of_two(Db1) ->
     Actions = [
         {create, {<<"a">>, {[]}}},
         {create, {<<"b">>, {[]}}},
         {update, {<<"a">>, {[]}}}
     ],
-    {ok, Db2} = test_engine_util:apply_actions(Db1, Actions),
+    {ok, Db2} = cet_util:apply_actions(Db1, Actions),
 
     ?assertEqual(2, couch_db_engine:count_changes_since(Db2, 0)),
     {ok, Changes} =
@@ -110,14 +114,13 @@ cet_update_first_of_two() ->
     ?assertEqual([{<<"b">>, 2}, {<<"a">>, 3}], lists:reverse(Changes)).
 
 
-cet_update_second_of_two() ->
-    {ok, Db1} = test_engine_util:create_db(),
+cet_update_second_of_two(Db1) ->
     Actions = [
         {create, {<<"a">>, {[]}}},
         {create, {<<"b">>, {[]}}},
         {update, {<<"b">>, {[]}}}
     ],
-    {ok, Db2} = test_engine_util:apply_actions(Db1, Actions),
+    {ok, Db2} = cet_util:apply_actions(Db1, Actions),
 
     ?assertEqual(2, couch_db_engine:count_changes_since(Db2, 0)),
     {ok, Changes} =
@@ -125,7 +128,7 @@ cet_update_second_of_two() ->
     ?assertEqual([{<<"a">>, 1}, {<<"b">>, 3}], lists:reverse(Changes)).
 
 
-cet_check_mutation_ordering() ->
+cet_check_mutation_ordering(Db1) ->
     Actions = shuffle(lists:map(fun(Seq) ->
         {create, {docid(Seq), {[]}}}
     end, lists:seq(1, ?NUM_DOCS))),
@@ -133,8 +136,7 @@ cet_check_mutation_ordering() ->
     DocIdOrder = [DocId || {_, {DocId, _}} <- Actions],
     DocSeqs = lists:zip(DocIdOrder, lists:seq(1, ?NUM_DOCS)),
 
-    {ok, Db1} = test_engine_util:create_db(),
-    {ok, Db2} = test_engine_util:apply_actions(Db1, Actions),
+    {ok, Db2} = cet_util:apply_actions(Db1, Actions),
 
     % First lets see that we can get the correct
     % suffix/prefix starting at every update sequence
@@ -158,7 +160,7 @@ do_mutation_ordering(Db, _Seq, [], FinalDocSeqs) ->
 
 do_mutation_ordering(Db, Seq, [{DocId, _OldSeq} | Rest], DocSeqAcc) ->
     Actions = [{update, {DocId, {[]}}}],
-    {ok, NewDb} = test_engine_util:apply_actions(Db, Actions),
+    {ok, NewDb} = cet_util:apply_actions(Db, Actions),
     NewAcc = DocSeqAcc ++ [{DocId, Seq}],
     Expected = Rest ++ NewAcc,
     {ok, RevOrder} =
