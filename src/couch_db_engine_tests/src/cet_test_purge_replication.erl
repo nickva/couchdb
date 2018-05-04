@@ -21,7 +21,7 @@
 
 
 setup_mod() ->
-    cet_util:setup_mod([mem3, fabric]).
+    cet_util:setup_mod([mem3, fabric, couch_replicator]).
 
 
 setup_test() ->
@@ -35,76 +35,159 @@ teardown_test({SrcDb, TgtDb}) ->
     ok = couch_server:delete(TgtDb, []).
 
 
-cet_purge_repl_disabled({SrcDb, TgtDb}) ->
+cet_purge_http_replication({Source, Target}) ->
+    {ok, Rev1} = cet_util:save_doc(Source, {[{'_id', foo}, {vsn, 1}]}),
+
+    cet_util:assert_db_props(Source, [
+        {doc_count, 1},
+        {del_doc_count, 0},
+        {update_seq, 1},
+        {changes, 1},
+        {purge_seq, 0},
+        {purge_infos, []}
+    ]),
+
+    RepObject = {[
+        {<<"source">>, Source},
+        {<<"target">>, Target}
+    ]},
+
+    {ok, _} = couch_replicator:replicate(RepObject, ?ADMIN_USER),
+    {ok, Doc1} = cet_util:open_doc(Target, foo),
+
+    cet_util:assert_db_props(Target, [
+        {doc_count, 1},
+        {del_doc_count, 0},
+        {update_seq, 1},
+        {changes, 1},
+        {purge_seq, 0},
+        {purge_infos, []}
+    ]),
+
+    PurgeInfos = [
+        {cet_util:uuid(), <<"foo">>, [Rev1]}
+    ],
+
+    {ok, [{ok, PRevs}]} = cet_util:purge(Source, PurgeInfos),
+    ?assertEqual([Rev1], PRevs),
+
+    cet_util:assert_db_props(Source, [
+        {doc_count, 0},
+        {del_doc_count, 0},
+        {update_seq, 2},
+        {changes, 0},
+        {purge_seq, 1},
+        {purge_infos, PurgeInfos}
+    ]),
+
+    % Show that a purge on the source is
+    % not replicated to the target
+    {ok, _} = couch_replicator:replicate(RepObject, ?ADMIN_USER),
+    {ok, Doc2} = cet_util:open_doc(Target, foo),
+    [Rev2] = Doc2#doc_info.revs,
+    ?assertEqual(Rev1, Rev2#rev_info.rev),
+    ?assertEqual(Doc1, Doc2),
+
+    cet_util:assert_db_props(Target, [
+        {doc_count, 1},
+        {del_doc_count, 0},
+        {update_seq, 1},
+        {changes, 1},
+        {purge_seq, 0},
+        {purge_infos, []}
+    ]),
+
+    % Show that replicating from the target
+    % back to the source reintroduces the doc
+    RepObject2 = {[
+        {<<"source">>, Target},
+        {<<"target">>, Source}
+    ]},
+
+    {ok, _} = couch_replicator:replicate(RepObject2, ?ADMIN_USER),
+    {ok, Doc3} = cet_util:open_doc(Source, foo),
+    [Revs3] = Doc3#doc_info.revs,
+    ?assertEqual(Rev1, Revs3#rev_info.rev),
+
+    cet_util:assert_db_props(Source, [
+        {doc_count, 1},
+        {del_doc_count, 0},
+        {update_seq, 3},
+        {changes, 1},
+        {purge_seq, 1},
+        {purge_infos, PurgeInfos}
+    ]).
+
+
+cet_purge_internal_repl_disabled({Source, Target}) ->
     cet_util:with_config([{"mem3", "replicate_purges", "false"}], fun() ->
-        repl(SrcDb, TgtDb),
+        repl(Source, Target),
 
-        Actions1 = [
-            {create, {<<"foo1">>, {[{<<"vsn">>, 1}]}}},
-            {create, {<<"foo2">>, {[{<<"vsn">>, 2}]}}}
+        {ok, [Rev1, Rev2]} = cet_util:save_docs(Source, [
+            {[{'_id', foo1}, {vsn, 1}]},
+            {[{'_id', foo2}, {vsn, 2}]}
+        ]),
+
+        repl(Source, Target),
+
+        PurgeInfos1 = [
+            {cet_util:uuid(), <<"foo1">>, [Rev1]}
         ],
-        ok = cet_util:apply_actions(SrcDb, Actions1),
-        repl(SrcDb, TgtDb),
+        {ok, [{ok, PRevs1}]} = cet_util:purge(Source, PurgeInfos1),
+        ?assertEqual([Rev1], PRevs1),
 
-        Actions2 = [
-            {purge, {<<"foo1">>, prev_rev(SrcDb, <<"foo1">>)}}
+        PurgeInfos2 = [
+            {cet_util:uuid(), <<"foo2">>, [Rev2]}
         ],
-        ok = cet_util:apply_actions(SrcDb, Actions2),
+        {ok, [{ok, PRevs2}]} = cet_util:purge(Target, PurgeInfos2),
+        ?assertEqual([Rev2], PRevs2),
 
-        Actions3 = [
-            {purge, {<<"foo2">>, prev_rev(TgtDb, <<"foo2">>)}}
-        ],
-        ok = cet_util:apply_actions(TgtDb, Actions3),
-
-        SrcShard = make_shard(SrcDb),
-        TgtShard = make_shard(TgtDb),
+        SrcShard = make_shard(Source),
+        TgtShard = make_shard(Target),
         ?assertEqual({ok, 0}, mem3_rep:go(SrcShard, TgtShard)),
+        ?assertEqual({ok, 0}, mem3_rep:go(TgtShard, SrcShard)),
 
-        ?assertMatch([#full_doc_info{}], open_docs(SrcDb, [<<"foo2">>])),
-        ?assertMatch([#full_doc_info{}], open_docs(TgtDb, [<<"foo1">>]))
+        ?assertMatch({ok, #doc_info{}}, cet_util:open_doc(Source, <<"foo2">>)),
+        ?assertMatch({ok, #doc_info{}}, cet_util:open_doc(Target, <<"foo1">>))
     end).
 
 
-cet_purge_repl_simple_pull({SrcDb, TgtDb}) ->
-    repl(SrcDb, TgtDb),
+cet_purge_repl_simple_pull({Source, Target}) ->
+    repl(Source, Target),
 
-    Actions1 = [
-        {create, {<<"foo">>, {[{<<"vsn">>, 1}]}}}
+    {ok, Rev} = cet_util:save_doc(Source, {[{'_id', foo}, {vsn, 1}]}),
+    repl(Source, Target),
+
+    PurgeInfos = [
+        {cet_util:uuid(), <<"foo">>, [Rev]}
     ],
-    ok = cet_util:apply_actions(SrcDb, Actions1),
-    repl(SrcDb, TgtDb),
+    {ok, [{ok, PRevs}]} = cet_util:purge(Target, PurgeInfos),
+    ?assertEqual([Rev], PRevs),
+    repl(Source, Target).
 
-    Actions2 = [
-        {purge, {<<"foo">>, prev_rev(TgtDb, <<"foo">>)}}
+
+cet_purge_repl_simple_push({Source, Target}) ->
+    repl(Source, Target),
+
+    {ok, Rev} = cet_util:save_doc(Source, {[{'_id', foo}, {vsn, 1}]}),
+    repl(Source, Target),
+
+    PurgeInfos = [
+        {cet_util:uuid(), <<"foo">>, [Rev]}
     ],
-    ok = cet_util:apply_actions(TgtDb, Actions2),
-    repl(SrcDb, TgtDb).
+    {ok, [{ok, PRevs}]} = cet_util:purge(Source, PurgeInfos),
+    ?assertEqual([Rev], PRevs),
+    repl(Source, Target).
 
 
-cet_purge_repl_simple_push({SrcDb, TgtDb}) ->
-    repl(SrcDb, TgtDb),
-
-    Actions1 = [
-        {create, {<<"foo">>, {[{<<"vsn">>, 1}]}}}
-    ],
-    ok = cet_util:apply_actions(SrcDb, Actions1),
-    repl(SrcDb, TgtDb),
-
-    Actions2 = [
-        {purge, {<<"foo">>, prev_rev(SrcDb, <<"foo">>)}}
-    ],
-    ok = cet_util:apply_actions(SrcDb, Actions2),
-    repl(SrcDb, TgtDb).
-
-
-repl(SrcDb, TgtDb) ->
-    SrcShard = make_shard(SrcDb),
-    TgtShard = make_shard(TgtDb),
+repl(Source, Target) ->
+    SrcShard = make_shard(Source),
+    TgtShard = make_shard(Target),
 
     ?assertEqual({ok, 0}, mem3_rep:go(SrcShard, TgtShard)),
 
-    SrcTerm = cet_util:db_as_term(SrcDb, replication),
-    TgtTerm = cet_util:db_as_term(TgtDb, replication),
+    SrcTerm = cet_util:db_as_term(Source, replication),
+    TgtTerm = cet_util:db_as_term(Target, replication),
     Diff = cet_util:term_diff(SrcTerm, TgtTerm),
     ?assertEqual(nodiff, Diff).
 
@@ -116,18 +199,3 @@ make_shard(DbName) ->
         dbname = DbName,
         range = [0, 16#FFFFFFFF]
     }.
-
-
-open_docs(DbName, DocIds) ->
-    {ok, Db} = couch_db:open_int(DbName, [?ADMIN_CTX]),
-    try
-        couch_db_engine:open_docs(Db, DocIds)
-    after
-        couch_db:close(Db)
-    end.
-
-
-prev_rev(DbName, DocId) ->
-    [FDI] = open_docs(DbName, [DocId]),
-    PrevRev = cet_util:prev_rev(FDI),
-    PrevRev#rev_info.rev.

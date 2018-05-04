@@ -15,21 +15,23 @@
 -compile(nowarn_export_all).
 
 
+-include_lib("eunit/include/eunit.hrl").
 -include_lib("couch/include/couch_db.hrl").
 
 
 -define(TEST_MODULES, [
-    cet_test_open_close_delete,
-    cet_test_get_set_props,
-    cet_test_read_write_docs,
-    cet_test_attachments,
-    cet_test_purge_docs,
-    cet_test_fold_docs,
-    cet_test_fold_changes,
-    cet_test_fold_purge_infos,
-    cet_test_compaction,
-    cet_test_purge_replication,
-    cet_test_ref_counting
+    %% cet_test_open_close_delete,
+    %% cet_test_get_set_props,
+    %% cet_test_read_write_docs,
+    %% cet_test_attachments,
+    %% cet_test_purge_docs,
+    %% cet_test_fold_docs,
+    %% cet_test_fold_changes,
+    %% cet_test_fold_purge_infos,
+    %% cet_test_compaction,
+    %% cet_test_purge_replication,
+    cet_test_purge_bad_checkpoints %,
+    %% cet_test_ref_counting
 ]).
 
 
@@ -117,6 +119,117 @@ shutdown_db(Db) ->
             false -> ok
         end
     end).
+
+
+save_doc(DbName, Json) ->
+    {ok, [Rev]} = save_docs(DbName, [Json], []),
+    {ok, Rev}.
+
+
+save_docs(DbName, JsonDocs) ->
+    save_docs(DbName, JsonDocs, []).
+
+
+save_docs(DbName, JsonDocs, Options) ->
+    Docs = lists:map(fun(JDoc) ->
+        couch_doc:from_json_obj(?JSON_DECODE(?JSON_ENCODE(JDoc)))
+    end, JsonDocs),
+    Opts = [full_commit | Options],
+    {ok, Db} = couch_db:open_int(DbName, []),
+    try
+        case lists:member(replicated_changes, Options) of
+            true ->
+                {ok, []} = couch_db:update_docs(
+                        Db, Docs, Opts, replicated_changes),
+                {ok, lists:map(fun(Doc) ->
+                    {Pos, [RevId | _]} = Doc#doc.revs,
+                    {Pos, RevId}
+                end, Docs)};
+            false ->
+                {ok, Resp} = couch_db:update_docs(Db, Docs, Opts),
+                {ok, [Rev || {ok, Rev} <- Resp]}
+        end
+    after
+        couch_db:close(Db)
+    end.
+
+
+open_doc(DbName, DocId0) ->
+    DocId = ?JSON_DECODE(?JSON_ENCODE(DocId0)),
+    {ok, Db} = couch_db:open_int(DbName, []),
+    try
+        couch_db:get_doc_info(Db, DocId)
+    after
+        couch_db:close(Db)
+    end.
+
+
+purge(DbName, PurgeInfos) ->
+    purge(DbName, PurgeInfos, []).
+
+
+purge(DbName, PurgeInfos0, Options) when is_list(PurgeInfos0) ->
+    PurgeInfos = lists:map(fun({UUID, DocIdJson, Revs}) ->
+        {UUID, ?JSON_DECODE(?JSON_ENCODE(DocIdJson)), Revs}
+    end, PurgeInfos0),
+    {ok, Db} = couch_db:open_int(DbName, []),
+    try
+        couch_db:purge_docs(Db, PurgeInfos, Options)
+    after
+        couch_db:close(Db)
+    end.
+
+
+uuid() ->
+    couch_uuids:random().
+
+
+assert_db_props(DbName, Props) when is_binary(DbName) ->
+    {ok, Db} = couch_db:open_int(DbName, []),
+    try
+        assert_db_props(Db, Props)
+    after
+        couch_db:close(Db)
+    end;
+
+assert_db_props(Db, Props) ->
+    assert_each_prop(Db, Props).
+
+
+assert_each_prop(_Db, []) ->
+    ok;
+assert_each_prop(Db, [{doc_count, Expect} | Rest]) ->
+    {ok, DocCount} = couch_db:get_doc_count(Db),
+    ?assertEqual(Expect, DocCount),
+    assert_each_prop(Db, Rest);
+assert_each_prop(Db, [{del_doc_count, Expect} | Rest]) ->
+    {ok, DelDocCount} = couch_db:get_del_doc_count(Db),
+    ?assertEqual(Expect, DelDocCount),
+    assert_each_prop(Db, Rest);
+assert_each_prop(Db, [{update_seq, Expect} | Rest]) ->
+    UpdateSeq = couch_db:get_update_seq(Db),
+    ?assertEqual(Expect, UpdateSeq),
+    assert_each_prop(Db, Rest);
+assert_each_prop(Db, [{changes, Expect} | Rest]) ->
+    {ok, NumChanges} = couch_db:fold_changes(Db, 0, fun aep_changes/2, 0, []),
+    ?assertEqual(Expect, NumChanges),
+    assert_each_prop(Db, Rest);
+assert_each_prop(Db, [{purge_seq, Expect} | Rest]) ->
+    {ok, PurgeSeq} = couch_db:get_purge_seq(Db),
+    ?assertEqual(Expect, PurgeSeq),
+    assert_each_prop(Db, Rest);
+assert_each_prop(Db, [{purge_infos, Expect} | Rest]) ->
+    {ok, PurgeInfos} = couch_db:fold_purge_infos(Db, 0, fun aep_fold/2, [], []),
+    ?assertEqual(Expect, lists:reverse(PurgeInfos)),
+    assert_each_prop(Db, Rest).
+
+
+aep_changes(_A, Acc) ->
+    {ok, Acc + 1}.
+
+
+aep_fold({_PSeq, UUID, Id, Revs}, Acc) ->
+    {ok, [{UUID, Id, Revs} | Acc]}.
 
 
 apply_actions(DbName, Actions) when is_binary(DbName) ->
@@ -312,12 +425,9 @@ db_as_term(Db) ->
     db_as_term(Db, compact).
 
 db_as_term(DbName, Type) when is_binary(DbName) ->
-    {ok, Db} = couch_db:open_int(DbName, [?ADMIN_CTX]),
-    try
+    couch_util:with_db(DbName, fun(Db) ->
         db_as_term(Db, Type)
-    after
-        couch_db:close(Db)
-    end;
+    end);
 
 db_as_term(Db, Type) ->
     [
