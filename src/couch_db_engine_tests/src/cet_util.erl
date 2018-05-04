@@ -10,7 +10,7 @@
 % License for the specific language governing permissions and limitations under
 % the License.
 
--module(test_engine_util).
+-module(cet_util).
 -compile(export_all).
 
 
@@ -18,17 +18,17 @@
 
 
 -define(TEST_MODULES, [
-    %% test_engine_open_close_delete,
-    %% test_engine_get_set_props,
-    %% test_engine_read_write_docs,
-    %% test_engine_attachments,
-    %% test_engine_fold_docs,
-    %% test_engine_fold_changes,
-    %% test_engine_fold_purge_infos,
-    %% test_engine_purge_docs,
-    test_engine_purge_replication
-    %% test_engine_compaction,
-    %% test_engine_ref_counting
+    %% cet_open_close_delete,
+    %% cet_get_set_props,
+    %% cet_read_write_docs,
+    %% cet_attachments,
+    %% cet_fold_docs,
+    %% cet_fold_changes,
+    %% cet_fold_purge_infos,
+    %% cet_purge_docs,
+    cet_purge_replication
+    %% cet_compaction,
+    %% cet_ref_counting
 ]).
 
 
