@@ -22,6 +22,13 @@ setup_test() ->
     cet_util:dbname().
 
 
+teardown_test(DbName) ->
+    case couch_server:exists(DbName) of
+        true -> ok = couch_server:delete(DbName, []);
+        false -> ok
+    end.
+
+
 cet_open_non_existent(DbName) ->
     % Try twice to check that a failed open doesn't create
     % the database for some reason.

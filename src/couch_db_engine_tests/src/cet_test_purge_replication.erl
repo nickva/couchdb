@@ -24,9 +24,19 @@ setup_mod() ->
     cet_util:setup_mod([mem3, fabric]).
 
 
-cet_purge_repl_disabled() ->
+setup_test() ->
+    {ok, Src} = cet_util:create_db(),
+    {ok, Tgt} = cet_util:create_db(),
+    {couch_db:name(Src), couch_db:name(Tgt)}.
+
+
+teardown_test({SrcDb, TgtDb}) ->
+    ok = couch_server:delete(SrcDb, []),
+    ok = couch_server:delete(TgtDb, []).
+
+
+cet_purge_repl_disabled({SrcDb, TgtDb}) ->
     cet_util:with_config([{"mem3", "replicate_purges", "false"}], fun() ->
-        {ok, SrcDb, TgtDb} = create_db_pair(),
         repl(SrcDb, TgtDb),
 
         Actions1 = [
@@ -55,8 +65,7 @@ cet_purge_repl_disabled() ->
     end).
 
 
-cet_purge_repl_simple_pull() ->
-    {ok, SrcDb, TgtDb} = create_db_pair(),
+cet_purge_repl_simple_pull({SrcDb, TgtDb}) ->
     repl(SrcDb, TgtDb),
 
     Actions1 = [
@@ -72,8 +81,7 @@ cet_purge_repl_simple_pull() ->
     repl(SrcDb, TgtDb).
 
 
-cet_purge_repl_simple_push() ->
-    {ok, SrcDb, TgtDb} = create_db_pair(),
+cet_purge_repl_simple_push({SrcDb, TgtDb}) ->
     repl(SrcDb, TgtDb),
 
     Actions1 = [
@@ -87,17 +95,6 @@ cet_purge_repl_simple_push() ->
     ],
     ok = cet_util:apply_actions(SrcDb, Actions2),
     repl(SrcDb, TgtDb).
-
-
-create_db_pair() ->
-    {ok, SrcDb} = cet_util:create_db(),
-    {ok, TgtDb} = cet_util:create_db(),
-    try
-        {ok, couch_db:name(SrcDb), couch_db:name(TgtDb)}
-    after
-        couch_db:close(SrcDb),
-        couch_db:close(TgtDb)
-    end.
 
 
 repl(SrcDb, TgtDb) ->

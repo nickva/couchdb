@@ -19,8 +19,16 @@
 -include_lib("couch/include/couch_db.hrl").
 
 
-cet_compact_empty() ->
-    {ok, Db1} = cet_util:create_db(),
+setup_test() ->
+    {ok, Db} = cet_util:create_db(),
+    Db.
+
+
+teardown_test(Db) ->
+    ok = couch_server:delete(couch_db:name(Db), []).
+
+
+cet_compact_empty(Db1) ->
     Term1 = cet_util:db_as_term(Db1),
 
     cet_util:compact(Db1),
@@ -32,8 +40,7 @@ cet_compact_empty() ->
     ?assertEqual(nodiff, Diff).
 
 
-cet_compact_doc() ->
-    {ok, Db1} = cet_util:create_db(),
+cet_compact_doc(Db1) ->
     Actions = [{create, {<<"foo">>, {[]}}}],
     {ok, Db2} = cet_util:apply_actions(Db1, Actions),
     Term1 = cet_util:db_as_term(Db2),
@@ -47,8 +54,7 @@ cet_compact_doc() ->
     ?assertEqual(nodiff, Diff).
 
 
-cet_compact_local_doc() ->
-    {ok, Db1} = cet_util:create_db(),
+cet_compact_local_doc(Db1) ->
     Actions = [{create, {<<"_local/foo">>, {[]}}}],
     {ok, Db2} = cet_util:apply_actions(Db1, Actions),
     Term1 = cet_util:db_as_term(Db2),
@@ -62,9 +68,7 @@ cet_compact_local_doc() ->
     ?assertEqual(nodiff, Diff).
 
 
-cet_compact_with_everything() ->
-    {ok, Db1} = cet_util:create_db(),
-
+cet_compact_with_everything(Db1) ->
     % Add a whole bunch of docs
     DocActions = lists:map(fun(Seq) ->
         {create, {docid(Seq), {[{<<"int">>, Seq}]}}}
@@ -148,9 +152,7 @@ cet_compact_with_everything() ->
     ?assertEqual(nodiff, Diff).
 
 
-cet_recompact_updates() ->
-    {ok, Db1} = cet_util:create_db(),
-
+cet_recompact_updates(Db1) ->
     Actions1 = lists:map(fun(Seq) ->
         {create, {docid(Seq), {[{<<"int">>, Seq}]}}}
     end, lists:seq(1, 1000)),
@@ -177,9 +179,7 @@ cet_recompact_updates() ->
     ?assertEqual(nodiff, Diff).
 
 
-cet_purge_during_compact() ->
-    {ok, Db1} = cet_util:create_db(),
-
+cet_purge_during_compact(Db1) ->
     Actions1 = lists:map(fun(Seq) ->
         {create, {docid(Seq), {[{<<"int">>, Seq}]}}}
     end, lists:seq(1, 1000)),
@@ -218,9 +218,7 @@ cet_purge_during_compact() ->
     ?assertEqual(nodiff, Diff).
 
 
-cet_multiple_purge_during_compact() ->
-    {ok, Db1} = cet_util:create_db(),
-
+cet_multiple_purge_during_compact(Db1) ->
     Actions1 = lists:map(fun(Seq) ->
         {create, {docid(Seq), {[{<<"int">>, Seq}]}}}
     end, lists:seq(1, 1000)),
@@ -265,8 +263,7 @@ cet_multiple_purge_during_compact() ->
     ?assertEqual(nodiff, Diff).
 
 
-cet_compact_purged_docs_limit() ->
-    {ok, Db1} = cet_util:create_db(),
+cet_compact_purged_docs_limit(Db1) ->
     NumDocs = 1200,
     {RActions, RIds} = lists:foldl(fun(Id, {CActions, CIds}) ->
         Id1 = docid(Id),

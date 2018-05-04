@@ -60,32 +60,33 @@ cet_two_changes(Db1) ->
 
 
 cet_two_changes_batch(Db1) ->
-    Actions1 = [
+    Actions = [
         {batch, [
             {create, {<<"a">>, {[]}}},
             {create, {<<"b">>, {[]}}}
         ]}
     ],
-    {ok, Db2} = cet_util:apply_actions(Db1, Actions1),
+    {ok, Db2} = cet_util:apply_actions(Db1, Actions),
 
     ?assertEqual(2, couch_db_engine:count_changes_since(Db2, 0)),
-    {ok, Changes1} =
+    {ok, Changes} =
             couch_db_engine:fold_changes(Db2, 0, fun fold_fun/2, [], []),
-    ?assertEqual([{<<"a">>, 1}, {<<"b">>, 2}], lists:reverse(Changes1)),
+    ?assertEqual([{<<"a">>, 1}, {<<"b">>, 2}], lists:reverse(Changes)).
 
-    {ok, Db3} = cet_util:create_db(),
-    Actions2 = [
+
+cet_two_changes_batch_sorted(Db1) ->
+    Actions = [
         {batch, [
             {create, {<<"b">>, {[]}}},
             {create, {<<"a">>, {[]}}}
         ]}
     ],
-    {ok, Db4} = cet_util:apply_actions(Db3, Actions2),
+    {ok, Db2} = cet_util:apply_actions(Db1, Actions),
 
-    ?assertEqual(2, couch_db_engine:count_changes_since(Db4, 0)),
-    {ok, Changes2} =
-            couch_db_engine:fold_changes(Db4, 0, fun fold_fun/2, [], []),
-    ?assertEqual([{<<"a">>, 1}, {<<"b">>, 2}], lists:reverse(Changes2)).
+    ?assertEqual(2, couch_db_engine:count_changes_since(Db2, 0)),
+    {ok, Changes} =
+            couch_db_engine:fold_changes(Db2, 0, fun fold_fun/2, [], []),
+    ?assertEqual([{<<"a">>, 1}, {<<"b">>, 2}], lists:reverse(Changes)).
 
 
 cet_update_one(Db1) ->

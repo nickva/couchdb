@@ -22,21 +22,27 @@
 -define(NUM_CLIENTS, 1000).
 
 
-cet_empty_monitors() ->
+setup_test() ->
     {ok, Db} = cet_util:create_db(),
+    {Db, self()}.
+
+
+teardown_test({Db, _}) ->
+    ok = couch_server:delete(couch_db:name(Db), []).
+
+
+cet_empty_monitors({Db, Pid}) ->
     Pids = couch_db_engine:monitored_by(Db),
     ?assert(is_list(Pids)),
     Expected = [
-        self(),
+        Pid,
         couch_db:get_pid(Db),
         whereis(couch_stats_process_tracker)
     ],
     ?assertEqual([], Pids -- Expected).
 
 
-cet_incref_decref() ->
-    {ok, Db} = cet_util:create_db(),
-
+cet_incref_decref({Db, _}) ->
     {Pid, _} = Client = start_client(Db),
     wait_client(Client),
 
@@ -49,8 +55,7 @@ cet_incref_decref() ->
     ?assert(not lists:member(Pid, Pids2)).
 
 
-cet_incref_decref_many() ->
-    {ok, Db} = cet_util:create_db(),
+cet_incref_decref_many({Db, _}) ->
     Clients = lists:map(fun(_) ->
         start_client(Db)
     end, lists:seq(1, ?NUM_CLIENTS)),
