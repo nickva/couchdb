@@ -22,12 +22,12 @@
 -define(REV_DEPTH, 100).
 
 
-setup_test() ->
+setup_each() ->
     {ok, Db} = cet_util:create_db(),
     couch_db:name(Db).
 
 
-teardown_test(DbName) ->
+teardown_each(DbName) ->
     ok = couch_server:delete(DbName, []).
 
 

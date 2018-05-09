@@ -20,17 +20,17 @@
 -include_lib("mem3/include/mem3.hrl").
 
 
-setup_mod() ->
+setup_all() ->
     cet_util:setup_mod([mem3, fabric, couch_replicator]).
 
 
-setup_test() ->
+setup_each() ->
     {ok, Src} = cet_util:create_db(),
     {ok, Tgt} = cet_util:create_db(),
     {couch_db:name(Src), couch_db:name(Tgt)}.
 
 
-teardown_test({SrcDb, TgtDb}) ->
+teardown_each({SrcDb, TgtDb}) ->
     ok = couch_server:delete(SrcDb, []),
     ok = couch_server:delete(TgtDb, []).
 

@@ -19,7 +19,7 @@
 -include_lib("couch/include/couch_db.hrl").
 
 
-setup_test() ->
+setup_each() ->
     {ok, Db1} = cet_util:create_db(),
     {ok, Revs} = cet_util:save_docs(couch_db:name(Db1), [
         {[{'_id', foo0}, {vsn, 0}]},
@@ -43,7 +43,7 @@ setup_test() ->
     Db2.
 
 
-teardown_test(Db) ->
+teardown_each(Db) ->
     ok = couch_server:delete(couch_db:name(Db), []).
 
 

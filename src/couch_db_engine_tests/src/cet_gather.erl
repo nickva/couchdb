@@ -23,8 +23,8 @@ module(ModName) ->
 
     SetupMod = get_setup_mod(ModName, Exports),
     TeardownMod = get_teardown_mod(ModName, Exports),
-    SetupTest = get_fun(ModName, setup_test, 0, Exports),
-    TeardownTest = get_fun(ModName, teardown_test, 1, Exports),
+    SetupTest = get_fun(ModName, setup_each, 0, Exports),
+    TeardownTest = get_fun(ModName, teardown_each, 1, Exports),
 
     RevTests = lists:foldl(fun({Fun, Arity}, Acc) ->
         case {atom_to_list(Fun), Arity} of
@@ -54,14 +54,14 @@ module(ModName) ->
 
 
 get_setup_mod(ModName, Exports) ->
-    case lists:member({setup_mod, 0}, Exports) of
-        true -> fun ModName:setup_mod/0;
+    case lists:member({setup_all, 0}, Exports) of
+        true -> fun ModName:setup_all/0;
         false -> fun cet_util:setup_mod/0
     end.
 
 
 get_teardown_mod(ModName, Exports) ->
-    case lists:member({teardown_mod, 1}, Exports) of
+    case lists:member({teardown_all, 1}, Exports) of
         true -> fun ModName:teardown_mod/1;
         false -> fun cet_util:teardown_mod/1
     end.

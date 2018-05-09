@@ -22,12 +22,12 @@
 -define(NUM_DOCS, 100).
 
 
-setup_test() ->
+setup_each() ->
     {ok, Db} = cet_util:create_db(),
     Db.
 
 
-teardown_test(Db) ->
+teardown_each(Db) ->
     ok = couch_server:delete(couch_db:name(Db), []).
 
 
