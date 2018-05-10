@@ -56,14 +56,14 @@ module(ModName) ->
 get_setup_mod(ModName, Exports) ->
     case lists:member({setup_all, 0}, Exports) of
         true -> fun ModName:setup_all/0;
-        false -> fun cet_util:setup_mod/0
+        false -> fun cet_util:setup_all/0
     end.
 
 
 get_teardown_mod(ModName, Exports) ->
     case lists:member({teardown_all, 1}, Exports) of
-        true -> fun ModName:teardown_mod/1;
-        false -> fun cet_util:teardown_mod/1
+        true -> fun ModName:teardown_all/1;
+        false -> fun cet_util:teardown_all/1
     end.
 
 

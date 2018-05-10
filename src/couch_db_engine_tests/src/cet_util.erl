@@ -53,11 +53,11 @@ create_tests(EngineApp, EngineModule, Extension) ->
     end, ?TEST_MODULES).
 
 
-setup_mod() ->
-    setup_mod([]).
+setup_all() ->
+    setup_all([]).
 
 
-setup_mod(ExtraApps) ->
+setup_all(ExtraApps) ->
     Ctx = test_util:start_couch(ExtraApps),
     {ok, {_, EngineMod, Extension}} = application:get_env(couch, test_engine),
     EngineModStr = atom_to_list(EngineMod),
@@ -67,7 +67,7 @@ setup_mod(ExtraApps) ->
     Ctx.
 
 
-teardown_mod(Ctx) ->
+teardown_all(Ctx) ->
     test_util:stop_couch(Ctx).
 
 
