@@ -354,10 +354,10 @@ filter_purged_revs(Db, NodeIdRevs, Docs) ->
     Opts = [{start_key, StartKey}],
     FoldFun = fun(#doc{id = Id, body = {Props}}, Acc) ->
         case Id of
-            <<?LOCAL_DOC_PREFIX, "/purge-mem3-", _/binary>> ->
+            <<?LOCAL_DOC_PREFIX, "purge-mem3-", _/binary>> ->
                 TargetNodeBin = couch_util:get_value(<<"target_node">>, Props),
                 PurgeSeq = couch_util:get_value(<<"purge_seq">>, Props),
-                NewAcc = try
+                try
                     TargetNode = binary_to_existing_atom(TargetNodeBin, latin1),
                     case lists:member(TargetNode, Nodes) of
                         true ->
@@ -369,8 +369,7 @@ filter_purged_revs(Db, NodeIdRevs, Docs) ->
                     % A really old doc referring to a node that's
                     % no longer in the cluster
                     {ok, Acc}
-                end,
-                {ok, NewAcc};
+                end;
             _ ->
                 % We've processed all _local mem3 purge docs
                 {stop, Acc}
@@ -407,7 +406,7 @@ filter_purged_revs(Db, NodeIdRevs, Docs) ->
     % have been purged before running our updates
     RestGood = if NeedChecking == [] -> []; true ->
         CheckFoldFun = fun({PSeq, _UUID, DocId, Revs}, Acc) ->
-            FilterFun = fun({NS, FiltDocId, FiltRev}) ->
+            FilterFun = fun({NS, {FiltDocId, FiltRev}}) ->
                 % The `NS =< PSeq` portion of this translates to the
                 % fact that we haven't yet replicated PSeq to the
                 % target node, hence we would need to filter this read
@@ -418,11 +417,8 @@ filter_purged_revs(Db, NodeIdRevs, Docs) ->
             {ok, lists:filter(FilterFun, Acc)}
         end,
         StartSeq = lists:min([S || {S, _} <- NeedChecking]),
-        InitAcc = lists:flatmap(fun({NodeSeq, {DocId, Revs}}) ->
-            [{NodeSeq, DocId, Rev} || Rev <- Revs]
-        end, NeedChecking),
-        {ok, Result} =
-                couch_db:fold_purge_infos(Db, StartSeq, CheckFoldFun, InitAcc),
+        {ok, Result} = couch_db:fold_purge_infos(
+                Db, StartSeq, CheckFoldFun, NeedChecking),
         [{DocId, Rev} || {_NSeq, DocId, Rev} <- Result]
     end,
 
