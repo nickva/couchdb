@@ -15,7 +15,7 @@ couchTests.users_db_security = function(debug) {
   var usersDb = new CouchDB(db_name, {"X-Couch-Full-Commit":"false"});
   try { usersDb.createDb(); } catch (e) { /* ignore if exists*/ }
 
-  var passwordSchemes = ['pbkdf2', 'bcrypt'];
+  var passwordSchemes = ['pbkdf2'];//, 'bcrypt'];
 
   if (debug) debugger;
 
@@ -388,18 +388,18 @@ couchTests.users_db_security = function(debug) {
   var derivedKeyTests = {
     pbkdf2: function(derived_key) {
       TEquals(40, derived_key.length, "derived_key should exist");
-    },
-    bcrypt: function(derived_key) {
-      TEquals(60, derived_key.length, "derived_key should exist");
-    }
+    }//,
+    //bcrypt: function(derived_key) {
+    //  TEquals(60, derived_key.length, "derived_key should exist");
+    //}
   };
   var saltTests = {
     pbkdf2: function(salt) {
       TEquals(32, salt.length, "salt should exist");
-    },
-    bcrypt: function(salt) {
-      TEquals(undefined, salt, "salt should not exist");
-    }
+    } //,
+    //bcrypt: function(salt) {
+    //  TEquals(undefined, salt, "salt should not exist");
+    //}
   };
   passwordSchemes.forEach(function(scheme){
     run_on_modified_server(
@@ -469,29 +469,29 @@ couchTests.users_db_security = function(debug) {
     derivedKeyTests.pbkdf2(userDoc.derived_key);
     saltTests.pbkdf2(userDoc.salt);
 
-    // change scheme to bcrypt
-    CouchDB.login("jan", "apple");
-    var xhr = CouchDB.request("PUT", "/_node/node1@127.0.0.1/_config/couch_httpd_auth/password_scheme", {
-      body : JSON.stringify("bcrypt"),
-      headers: {"X-Couch-Persist": "false"}
-    });
-    TEquals(200, xhr.status);
-    xhr = CouchDB.request("GET", "/_node/node1@127.0.0.1/_config/couch_httpd_auth/password_scheme");
-    var scheme = JSON.parse(xhr.responseText);
-    TEquals("bcrypt", scheme);
+    // // change scheme to bcrypt
+    // CouchDB.login("jan", "apple");
+    // var xhr = CouchDB.request("PUT", "/_node/node1@127.0.0.1/_config/couch_httpd_auth/password_scheme", {
+    //   body : JSON.stringify("bcrypt"),
+    //   headers: {"X-Couch-Persist": "false"}
+    // });
+    // TEquals(200, xhr.status);
+    // xhr = CouchDB.request("GET", "/_node/node1@127.0.0.1/_config/couch_httpd_auth/password_scheme");
+    // var scheme = JSON.parse(xhr.responseText);
+    // TEquals("bcrypt", scheme);
 
-    // create new user (has bcrypt hash)
-    TEquals(true, usersDb.save(userDocs.fdmanana).ok, "should save document");
-    wait(5000);
-    userDoc = open_as(usersDb, "org.couchdb.user:fdmanana", "fdmanana");
-    TEquals(undefined, userDoc.password, "password field should be null 1");
-    TEquals("bcrypt", userDoc.password_scheme, "password_scheme should be bcrypt");
-    derivedKeyTests.bcrypt(userDoc.derived_key);
-    saltTests.bcrypt(userDoc.salt);
+    // // create new user (has bcrypt hash)
+    // TEquals(true, usersDb.save(userDocs.fdmanana).ok, "should save document");
+    // wait(5000);
+    // userDoc = open_as(usersDb, "org.couchdb.user:fdmanana", "fdmanana");
+    // TEquals(undefined, userDoc.password, "password field should be null 1");
+    // TEquals("bcrypt", userDoc.password_scheme, "password_scheme should be bcrypt");
+    // derivedKeyTests.bcrypt(userDoc.derived_key);
+    // saltTests.bcrypt(userDoc.salt);
 
-    // test that both users can still log in
-    TEquals(true, CouchDB.login(userDocs.jchris.name, userDocs.jchris.password).ok);
-    TEquals(true, CouchDB.login(userDocs.fdmanana.name, userDocs.fdmanana.password).ok);
+    // // test that both users can still log in
+    // TEquals(true, CouchDB.login(userDocs.jchris.name, userDocs.jchris.password).ok);
+    // TEquals(true, CouchDB.login(userDocs.fdmanana.name, userDocs.fdmanana.password).ok);
 
     // change scheme back to pbkdf2
     CouchDB.login("jan", "apple");
@@ -506,7 +506,7 @@ couchTests.users_db_security = function(debug) {
 
     // test that both users can still log in
     TEquals(true, CouchDB.login(userDocs.jchris.name, userDocs.jchris.password).ok);
-    TEquals(true, CouchDB.login(userDocs.fdmanana.name, userDocs.fdmanana.password).ok);
+    //TEquals(true, CouchDB.login(userDocs.fdmanana.name, userDocs.fdmanana.password).ok);
   };
   run_on_modified_server(
     [{

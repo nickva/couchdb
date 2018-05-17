@@ -14,22 +14,17 @@
 
 -export([less/2, less_json_ids/2, less_json/2]).
 
--on_load(init/0).
+%-on_load(init/0).
 
 
-init() ->
-    NumScheds = erlang:system_info(schedulers),
-    Dir = code:priv_dir(couch),
-    ok = erlang:load_nif(filename:join(Dir, ?MODULE), NumScheds).
+init() -> ok.
+    %NumScheds = erlang:system_info(schedulers),
+    %Dir = code:priv_dir(couch),
+    %ok = erlang:load_nif(filename:join(Dir, ?MODULE), NumScheds).
 
 less(A, B) ->
-    try
-        less_nif(A, B)
-    catch
-    error:badarg ->
-        % Maybe the EJSON structure is too deep, fallback to Erlang land.
-        less_erl(A, B)
-    end.
+    less_erl(A, B).
+
 
 less_json_ids({JsonA, IdA}, {JsonB, IdB}) ->
     case less(JsonA, JsonB) of
