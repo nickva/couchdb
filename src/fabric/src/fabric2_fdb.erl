@@ -186,7 +186,8 @@ create(#{} = Db0, Options) ->
         after_doc_read => undefined,
         % All other db things as we add features,
 
-        db_options => Options1
+        db_options => Options1,
+        need_member_check => false
     }.
 
 
@@ -223,7 +224,8 @@ open(#{} = Db0, Options) ->
         before_doc_update => undefined,
         after_doc_read => undefined,
 
-        db_options => Options1
+        db_options => Options1,
+        need_member_check => false
     },
 
     Db3 = lists:foldl(fun({Key, Val}, DbAcc) ->
@@ -246,10 +248,12 @@ reopen(#{} = OldDb) ->
         tx := Tx,
         name := DbName,
         db_options := Options,
-        user_ctx := UserCtx
+        user_ctx := UserCtx,
+        need_member_check := NeedMemberCheck
     } = OldDb,
     Options1 = lists:keystore(user_ctx, 1, Options, {user_ctx, UserCtx}),
-    open(init_db(Tx, DbName, Options1), Options1).
+    NewDb = open(init_db(Tx, DbName, Options1), Options1),
+    NewDb#{need_member_check := NeedMemberCheck}.
 
 
 delete(#{} = Db) ->

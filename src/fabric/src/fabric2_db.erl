@@ -163,7 +163,8 @@ create(DbName, Options) ->
                 #{} = Db0 ->
                     Db1 = maybe_add_sys_db_callbacks(Db0),
                     ok = fabric2_server:store(Db1),
-                    {ok, Db1#{tx := undefined}};
+                    Db2 = Db1#{tx := undefined},
+                    {ok, need_member_check(Db2)};
                 Error ->
                     Error
             end;
@@ -176,19 +177,18 @@ open(DbName, Options) ->
     case fabric2_server:fetch(DbName) of
         #{} = Db ->
             Db1 = maybe_set_user_ctx(Db, Options),
-            ok = check_is_member(Db1),
-            {ok, Db1};
+            {ok, need_member_check(Db1)};
         undefined ->
             Result = fabric2_fdb:transactional(DbName, Options, fun(TxDb) ->
                 fabric2_fdb:open(TxDb, Options)
             end),
             % Cache outside the transaction retry loop
             case Result of
-                #{security_doc := SecDoc} = Db0 ->
-                    ok = check_is_member(Db0, SecDoc),
+                #{} = Db0 ->
                     Db1 = maybe_add_sys_db_callbacks(Db0),
                     ok = fabric2_server:store(Db1),
-                    {ok, Db1#{tx := undefined}};
+                    Db2 = Db1#{tx := undefined},
+                    {ok, need_member_check(Db2)};
                 Error ->
                     Error
             end
@@ -266,6 +266,22 @@ check_is_admin(Db) ->
     end.
 
 
+need_member_check(Db) ->
+    Db#{need_member_check := true}.
+
+
+tx_member_check(#{need_member_check := true} = Db) ->
+    #{
+        tx := {erlfdb_transaction, _},
+        security_doc := SecDoc
+    } = Db,
+    ok = check_is_member(Db, SecDoc),
+    Db#{need_member_check := false};
+
+tx_member_check(#{need_member_check := false} = Db) ->
+    Db.
+
+
 check_is_member(Db) ->
     check_is_member(Db, get_security(Db)).
 
@@ -304,7 +320,8 @@ get_compactor_pid(#{} = _Db) ->
 
 
 get_db_info(#{} = Db) ->
-    DbProps = fabric2_fdb:transactional(Db, fun(TxDb) ->
+    DbProps = fabric2_fdb:transactional(Db, fun(TxDb0) ->
+        TxDb = tx_member_check(TxDb0),
         fabric2_fdb:get_info(TxDb)
     end),
 
@@ -345,7 +362,8 @@ get_doc_count(DbName, <<"_local">>) ->
     get_doc_count(DbName, <<"doc_local_count">>);
 
 get_doc_count(Db, Key) ->
-    fabric2_fdb:transactional(Db, fun(TxDb) ->
+    fabric2_fdb:transactional(Db, fun(TxDb0) ->
+        TxDb = tx_member_check(TxDb0),
         fabric2_fdb:get_stat(TxDb, Key)
     end).
 
@@ -359,21 +377,24 @@ get_pid(#{}) ->
 
 
 get_revs_limit(#{} = Db) ->
-    RevsLimitBin = fabric2_fdb:transactional(Db, fun(TxDb) ->
+    RevsLimitBin = fabric2_fdb:transactional(Db, fun(TxDb0) ->
+        TxDb = tx_member_check(TxDb0),
         fabric2_fdb:get_config(TxDb, <<"revs_limit">>)
     end),
     ?bin2uint(RevsLimitBin).
 
 
 get_security(#{} = Db) ->
-    SecBin = fabric2_fdb:transactional(Db, fun(TxDb) ->
+    SecBin = fabric2_fdb:transactional(Db, fun(TxDb0) ->
+        TxDb = tx_member_check(TxDb0),
         fabric2_fdb:get_config(TxDb, <<"security_doc">>)
     end),
     ?JSON_DECODE(SecBin).
 
 
 get_update_seq(#{} = Db) ->
-    fabric2_fdb:transactional(Db, fun(TxDb) ->
+    fabric2_fdb:transactional(Db, fun(TxDb0) ->
+        TxDb = tx_member_check(TxDb0),
         fabric2_fdb:get_last_change(TxDb)
     end).
 
@@ -480,7 +501,8 @@ open_doc(#{} = Db, DocId) ->
 
 
 open_doc(#{} = Db, <<?LOCAL_DOC_PREFIX, _/binary>> = DocId, _Options) ->
-    fabric2_fdb:transactional(Db, fun(TxDb) ->
+    fabric2_fdb:transactional(Db, fun(TxDb0) ->
+        TxDb = tx_member_check(TxDb0),
         case fabric2_fdb:get_local_doc(TxDb, DocId) of
             #doc{} = Doc -> {ok, Doc};
             Else -> Else
@@ -491,7 +513,8 @@ open_doc(#{} = Db, DocId, Options) ->
     NeedsTreeOpts = [revs_info, conflicts, deleted_conflicts],
     NeedsTree = (Options -- NeedsTreeOpts /= Options),
     OpenDeleted = lists:member(deleted, Options),
-    fabric2_fdb:transactional(Db, fun(TxDb) ->
+    fabric2_fdb:transactional(Db, fun(TxDb0) ->
+        TxDb = tx_member_check(TxDb0),
         Revs = case NeedsTree of
             true -> fabric2_fdb:get_all_revs(TxDb, DocId);
             false -> fabric2_fdb:get_winning_revs(TxDb, DocId, 1)
@@ -512,7 +535,8 @@ open_doc(#{} = Db, DocId, Options) ->
 
 open_doc_revs(Db, DocId, Revs, Options) ->
     Latest = lists:member(latest, Options),
-    fabric2_fdb:transactional(Db, fun(TxDb) ->
+    fabric2_fdb:transactional(Db, fun(TxDb0) ->
+        TxDb = tx_member_check(TxDb0),
         AllRevInfos = fabric2_fdb:get_all_revs(TxDb, DocId),
         RevTree = lists:foldl(fun(RI, TreeAcc) ->
             RIPath = fabric2_util:revinfo_to_path(RI),
@@ -558,7 +582,8 @@ get_doc_info(Db, DocId) ->
 
 
 get_full_doc_info(Db, DocId) ->
-    RevInfos = fabric2_fdb:transactional(Db, fun(TxDb) ->
+    RevInfos = fabric2_fdb:transactional(Db, fun(TxDb0) ->
+        TxDb = tx_member_check(TxDb0),
         fabric2_fdb:get_all_revs(TxDb, DocId)
     end),
     if RevInfos == [] -> not_found; true ->
@@ -578,7 +603,8 @@ get_full_doc_info(Db, DocId) ->
 
 
 get_full_doc_infos(Db, DocIds) ->
-    fabric2_fdb:transactional(Db, fun(TxDb) ->
+    fabric2_fdb:transactional(Db, fun(TxDb0) ->
+        TxDb = tx_member_check(TxDb0),
         lists:map(fun(DocId) ->
             get_full_doc_info(TxDb, DocId)
         end, DocIds)
@@ -587,7 +613,8 @@ get_full_doc_infos(Db, DocIds) ->
 
 get_missing_revs(Db, JsonIdRevs) ->
     IdRevs = [idrevs(IdR) || IdR <- JsonIdRevs],
-    AllRevInfos = fabric2_fdb:transactional(Db, fun(TxDb) ->
+    AllRevInfos = fabric2_fdb:transactional(Db, fun(TxDb0) ->
+        TxDb = tx_member_check(TxDb0),
         lists:foldl(fun({Id, _Revs}, Acc) ->
             case maps:is_key(Id, Acc) of
                 true ->
@@ -687,12 +714,14 @@ update_docs(Db, Docs0, Options) ->
         validate_atomic_update(Docs0, lists:member(all_or_nothing, Options)),
         Resps0 = case lists:member(replicated_changes, Options) of
             false ->
-                fabric2_fdb:transactional(Db, fun(TxDb) ->
+                fabric2_fdb:transactional(Db, fun(TxDb0) ->
+                    TxDb = tx_member_check(TxDb0),
                     update_docs_interactive(TxDb, Docs1, Options)
                 end);
             true ->
                 lists:map(fun(Doc) ->
-                    fabric2_fdb:transactional(Db, fun(TxDb) ->
+                    fabric2_fdb:transactional(Db, fun(TxDb0) ->
+                        TxDb = tx_member_check(TxDb0),
                         update_doc_int(TxDb, Doc, Options)
                     end)
                 end, Docs1)
@@ -733,7 +762,8 @@ update_docs(Db, Docs0, Options) ->
 
 
 read_attachment(Db, DocId, AttId) ->
-    fabric2_fdb:transactional(Db, fun(TxDb) ->
+    fabric2_fdb:transactional(Db, fun(TxDb0) ->
+        TxDb = tx_member_check(TxDb0),
         fabric2_fdb:read_attachment(TxDb, DocId, AttId)
     end).
 
@@ -749,7 +779,8 @@ fold_docs(Db, UserFun, UserAcc) ->
 
 
 fold_docs(Db, UserFun, UserAcc0, Options) ->
-    fabric2_fdb:transactional(Db, fun(TxDb) ->
+    fabric2_fdb:transactional(Db, fun(TxDb0) ->
+        TxDb = tx_member_check(TxDb0),
         try
             #{
                 db_prefix := DbPrefix
@@ -783,7 +814,8 @@ fold_design_docs(Db, UserFun, UserAcc0, Options1) ->
 
 
 fold_local_docs(Db, UserFun, UserAcc0, Options) ->
-     fabric2_fdb:transactional(Db, fun(TxDb) ->
+     fabric2_fdb:transactional(Db, fun(TxDb0) ->
+        TxDb = tx_member_check(TxDb0),
         try
             #{
                 db_prefix := DbPrefix
@@ -817,7 +849,8 @@ fold_changes(Db, SinceSeq, UserFun, UserAcc) ->
 
 
 fold_changes(Db, SinceSeq, UserFun, UserAcc, Options) ->
-    fabric2_fdb:transactional(Db, fun(TxDb) ->
+    fabric2_fdb:transactional(Db, fun(TxDb0) ->
+        TxDb = tx_member_check(TxDb0),
         try
             #{
                 db_prefix := DbPrefix
