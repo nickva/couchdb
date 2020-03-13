@@ -385,11 +385,29 @@ get_info_future(Tx, DbPrefix) ->
 
     StatsPrefix = erlfdb_tuple:pack({?DB_STATS}, DbPrefix),
     MetaFuture = erlfdb:get_range_startswith(Tx, StatsPrefix),
+    {Tx, DbPrefix, ChangesFuture, MetaFuture}.
 
-    {DbPrefix, ChangesFuture, MetaFuture}.
+
+get_info_wait({Tx, DbPrefix, ChangesFuture, MetaFuture}) ->
+    ReadOnly = not erlfdb:get_writes_allowed(Tx),
+    try
+        get_info_wait(DbPrefix, ChangesFuture, MetaFuture)
+    catch
+        error:{erlfdb_error, 2024} when ReadOnly ->
+            % Transaction may have been reset and so the future is stale
+            % try to get a new future from the new tx and retry one more time
+            Future1 = get_info_future(Tx, DbPrefix),
+            {_, _, ChangesFuture1, MetaFuture1} = Future1,
+            get_info_wait(DbPrefix, ChangesFuture1, MetaFuture1);
+        error:{erlfdb_error, ?TRANSACTION_TOO_OLD} when ReadOnly ->
+            ok = reset_tx(Tx),
+            Future1 = get_info_future(Tx, DbPrefix),
+            {_, _, ChangesFuture1, MetaFuture1} = Future1,
+            get_info_wait(DbPrefix, ChangesFuture1, MetaFuture1)
+    end.
 
 
-get_info_wait({DbPrefix, ChangesFuture, MetaFuture}) ->
+get_info_wait(DbPrefix, ChangesFuture, MetaFuture) ->
     RawSeq = case erlfdb:wait(ChangesFuture) of
         [] ->
             vs_to_seq(fabric2_util:seq_zero_vs());
@@ -1579,15 +1597,18 @@ fold_range_cb({K, V}, #fold_acc{} = Acc) ->
     Acc2.
 
 
-restart_fold(Tx, #fold_acc{} = Acc) ->
+reset_tx(Tx) ->
     erase(?PDICT_CHECKED_MD_IS_CURRENT),
-    % Not actually committing anyting so we skip on-commit handlers here. Those
-    % are usually to refresh db handles in the cache. If the iterator runs for
-    % a while it might be inserting a stale handle in there anyway.
+    % Not actually committing anything so we skip on-commit handlers
+    % here. Those are usually to refresh db handles in the cache. If
+    % the iterator runs for a while it might be inserting a stale
+    % handle in there anyway.
     erase({?PDICT_ON_COMMIT_FUN, Tx}),
+    erlfdb:reset(Tx).
 
-    ok = erlfdb:reset(Tx),
 
+restart_fold(Tx, #fold_acc{} = Acc) ->
+    ok = reset_tx(Tx),
     case {erase(?PDICT_FOLD_ACC_STATE), Acc#fold_acc.retries} of
         {#fold_acc{db = Db} = Acc1, _} ->
             Acc1#fold_acc{db = check_db_instance(Db), retries = 0};
