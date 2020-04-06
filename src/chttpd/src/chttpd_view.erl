@@ -26,14 +26,13 @@ multi_query_view(Req, Db, DDoc, ViewName, Queries) ->
         QueryArg1 = couch_mrview_util:set_view_type(QueryArg, ViewName, Views),
         fabric_util:validate_args(Db, DDoc, QueryArg1)
     end, Queries),
-    Options = [{user_ctx, Req#httpd.user_ctx}],
     VAcc0 = #vacc{db=Db, req=Req, prepend="\r\n"},
     FirstChunk = "{\"results\":[",
     {ok, Resp0} = chttpd:start_delayed_json_response(VAcc0#vacc.req, 200, [], FirstChunk),
     VAcc1 = VAcc0#vacc{resp=Resp0},
     VAcc2 = lists:foldl(fun(Args, Acc0) ->
-        {ok, Acc1} = fabric:query_view(Db, Options, DDoc, ViewName,
-            fun view_cb/2, Acc0, Args),
+        Fun = fun view_cb/2,
+        {ok, Acc1} = couch_views:query(Db, DDoc, ViewName, Fun, Acc0, Args),
         Acc1
     end, VAcc1, ArgQueries),
     {ok, Resp1} = chttpd:send_delayed_chunk(VAcc2#vacc.resp, "\r\n]}"),
@@ -140,7 +139,7 @@ check_multi_query_reduce_view_overrides_test_() ->
 t_check_include_docs_throw_validation_error() ->
     ?_test(begin
         Req = #httpd{qs = []},
-        Db = test_util:fake_db([{name, <<"foo">>}]),
+        Db = #{name => <<"foo">>},
         Query = {[{<<"include_docs">>, true}]},
         Throw = {query_parse_error, <<"`include_docs` is invalid for reduce">>},
         ?assertThrow(Throw, multi_query_view(Req, Db, ddoc, <<"v">>, [Query]))
@@ -150,7 +149,7 @@ t_check_include_docs_throw_validation_error() ->
 t_check_user_can_override_individual_query_type() ->
     ?_test(begin
         Req = #httpd{qs = []},
-        Db = test_util:fake_db([{name, <<"foo">>}]),
+        Db = #{name => <<"foo">>},
         Query = {[{<<"include_docs">>, true}, {<<"reduce">>, false}]},
         multi_query_view(Req, Db, ddoc, <<"v">>, [Query]),
         ?assertEqual(1, meck:num_calls(chttpd, start_delayed_json_response, '_'))
@@ -161,7 +160,7 @@ setup_all() ->
     Views = [#mrview{reduce_funs = [{<<"v">>, <<"_count">>}]}],
     meck:expect(couch_mrview_util, ddoc_to_mrst, 2, {ok, #mrst{views = Views}}),
     meck:expect(chttpd, start_delayed_json_response, 4, {ok, resp}),
-    meck:expect(fabric, query_view, 7, {ok, #vacc{}}),
+    meck:expect(couch_views, query, 6, {ok, #vacc{}}),
     meck:expect(chttpd, send_delayed_chunk, 2, {ok, resp}),
     meck:expect(chttpd, end_delayed_json_response, 1, ok).
 
@@ -173,8 +172,8 @@ teardown_all(_) ->
 setup() ->
     meck:reset([
         chttpd,
-        couch_mrview_util,
-        fabric
+        couch_views,
+        couch_mrview_util
     ]).
 
 

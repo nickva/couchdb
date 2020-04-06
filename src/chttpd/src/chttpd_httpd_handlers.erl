@@ -14,6 +14,9 @@
 
 -export([url_handler/1, db_handler/1, design_handler/1, handler_info/3]).
 
+-export([not_supported/3]).
+
+
 -include_lib("couch/include/couch_db.hrl").
 
 
@@ -41,11 +44,11 @@ db_handler(<<"_changes">>)      -> fun chttpd_db:handle_changes_req/2;
 db_handler(_) -> no_match.
 
 design_handler(<<"_view">>)    -> fun chttpd_view:handle_view_req/3;
-design_handler(<<"_show">>)    -> fun chttpd_show:handle_doc_show_req/3;
-design_handler(<<"_list">>)    -> fun chttpd_show:handle_view_list_req/3;
+design_handler(<<"_show">>)    -> fun ?MODULE:not_supported/3;
+design_handler(<<"_list">>)    -> fun ?MODULE:not_supported/3;
 design_handler(<<"_update">>)  -> fun chttpd_show:handle_doc_update_req/3;
 design_handler(<<"_info">>)    -> fun chttpd_db:handle_design_info_req/3;
-design_handler(<<"_rewrite">>) -> fun chttpd_rewrite:handle_rewrite_req/3;
+design_handler(<<"_rewrite">>) -> fun ?MODULE:not_supported/3;
 design_handler(_) -> no_match.
 
 
@@ -484,3 +487,7 @@ get_copy_destination(Req) ->
         unknown
     end.
 
+
+not_supported(#httpd{} = Req, _Db, _DDoc) ->
+    Msg = <<"resource is not supported in CouchDB >= 4.x">>,
+    chttpd:send_error(Req, 410, gone, Msg).

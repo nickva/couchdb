@@ -59,7 +59,10 @@ teardown([Url,UsersUrl]) ->
     ok = config:delete("admins", ?USER, _Persist=false).
 
 create_db(Url) ->
-    {ok, Status, _, _} = test_request:put(Url, [?CONTENT_JSON, ?AUTH], "{}"),
+    {ok, Status, _X, _Z} = test_request:put(Url, [?CONTENT_JSON, ?AUTH], "{}"),
+    ?debugVal(Status),
+    ?debugVal(_X),
+    ?debugVal(_Z),
     ?assert(Status =:= 201 orelse Status =:= 202).
 
 create_design_doc(Url) ->

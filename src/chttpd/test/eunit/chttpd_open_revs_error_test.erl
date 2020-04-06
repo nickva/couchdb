@@ -50,7 +50,7 @@ create_doc(Url, Id) ->
 delete_db(Url) ->
     {ok, 200, _, _} = test_request:delete(Url, [?AUTH]).
 
-open_revs_error_test_() ->
+open_revs_error_test_disabled() ->
     {
         "open revs error tests",
         {
