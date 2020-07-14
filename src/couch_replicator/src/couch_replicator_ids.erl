@@ -30,28 +30,29 @@
 %  {filter_fetch_error, Error} exception.
 %
 
-replication_id(#rep{options = Options} = Rep) ->
+replication_id(#{<<"options">> := Options} = Rep) ->
     BaseId = replication_id(Rep, ?REP_ID_VERSION),
-    {BaseId, maybe_append_options([continuous, create_target], Options)}.
+    UseOpts = [<<"continuous">>, <<"create_target">>]
+    {BaseId, maybe_append_options(UseOpts, Options)}.
 
 
 % Versioned clauses for generating replication IDs.
 % If a change is made to how replications are identified,
 % please add a new clause and increase ?REP_ID_VERSION.
 
-replication_id(#rep{} = Rep, 4) ->
+replication_id(#{<<"source">> := Src, <<"target">> := Tgt} = Rep, 4) ->
     UUID = couch_server:get_uuid(),
-    SrcInfo = get_v4_endpoint(Rep#rep.source),
-    TgtInfo = get_v4_endpoint(Rep#rep.target),
+    SrcInfo = get_v4_endpoint(Src),
+    TgtInfo = get_v4_endpoint(Tgt),
     maybe_append_filters([UUID, SrcInfo, TgtInfo], Rep);
 
-replication_id(#rep{} = Rep, 3) ->
+replication_id(#{<<"source">> := Src0, <<"target">> := Tgt0} = Rep, 3) ->
     UUID = couch_server:get_uuid(),
-    Src = get_rep_endpoint(Rep#rep.source),
-    Tgt = get_rep_endpoint(Rep#rep.target),
+    Src = get_rep_endpoint(Src0),
+    Tgt = get_rep_endpoint(Tgt0),
     maybe_append_filters([UUID, Src, Tgt], Rep);
 
-replication_id(#rep{} = Rep, 2) ->
+replication_id(#{<<"source">> := Src0, <<"target">> := Tgt0} = Rep, 2) ->
     {ok, HostName} = inet:gethostname(),
     Port = case (catch mochiweb_socket_server:get(couch_httpd, port)) of
     P when is_number(P) ->
@@ -64,14 +65,14 @@ replication_id(#rep{} = Rep, 2) ->
         % ... mochiweb_socket_server:get(https, port)
         list_to_integer(config:get("httpd", "port", "5984"))
     end,
-    Src = get_rep_endpoint(Rep#rep.source),
-    Tgt = get_rep_endpoint(Rep#rep.target),
+    Src = get_rep_endpoint(Src0),
+    Tgt = get_rep_endpoint(Tgt0),
     maybe_append_filters([HostName, Port, Src, Tgt], Rep);
 
-replication_id(#rep{} = Rep, 1) ->
+replication_id(#{<<"source">> := Src0, <<"target">> := Tgt0} = Rep, 1) ->
     {ok, HostName} = inet:gethostname(),
-    Src = get_rep_endpoint(Rep#rep.source),
-    Tgt = get_rep_endpoint(Rep#rep.target),
+    Src = get_rep_endpoint(Src0),
+    Tgt = get_rep_endpoint(Tgt0),
     maybe_append_filters([HostName, Src, Tgt], Rep).
 
 
@@ -83,15 +84,23 @@ convert(Id0) when is_binary(Id0) ->
     % the URL path. So undo the incorrect parsing here to avoid forcing
     % users to url encode + characters.
     Id = binary:replace(Id0, <<" ">>, <<"+">>, [global]),
-    lists:splitwith(fun(Char) -> Char =/= $+ end, ?b2l(Id));
-convert({BaseId, Ext} = Id) when is_list(BaseId), is_list(Ext) ->
+    case binary:split(Id, <<"+">>) of
+        [BaseId, Ext] -> {BaseId, Ext};
+        [BaseId] -> {BaseId, <<>>}
+    end
+convert({BaseId, Ext}) when is_list(BaseId), is_list(Ext) ->
+    {list_to_binary(BaseId), list_to_binary(Ext)};
+convert({BaseId, Ext} = Id) when is_binary(BaseId), is_binary(Ext) ->
     Id.
 
 
 % Private functions
 
-maybe_append_filters(Base,
-        #rep{source = Source, options = Options}) ->
+maybe_append_filters(Base, #{} = Rep) ->
+    #{
+        <<"source">> := Source,
+        <<"options">> := Options
+    } = Rep,
     Base2 = Base ++
         case couch_replicator_filters:parse(Options) of
         {ok, nil} ->
@@ -112,7 +121,8 @@ maybe_append_filters(Base,
         {error, FilterParseError} ->
             throw({error, FilterParseError})
         end,
-    couch_util:to_hex(couch_hash:md5_hash(term_to_binary(Base2))).
+    Res = couch_util:to_hex(couch_hash:md5_hash(term_to_binary(Base2))),
+    list_to_binary(Res).
 
 
 maybe_append_options(Options, RepOptions) ->
@@ -127,12 +137,19 @@ maybe_append_options(Options, RepOptions) ->
     end, [], Options).
 
 
-get_rep_endpoint(#httpdb{url=Url, headers=Headers}) ->
+get_rep_endpoint(#{<<"url">> := Url0, <<"headers">> := Headers0}) ->
+    Url = binary_to_list(Url0),
+    % We turn headers into a proplist of string() KVs to calculate
+    % the same replication ID as CouchDB 2.x
+    Headers1 = maps:fold(fun(K, V, Acc) ->
+        [{binary_to_list(K), binary_to_list(V)} | Acc]
+    end, [], Header0),
+    Headers2 = lists:keysort(1, Headers1),
     DefaultHeaders = (#httpdb{})#httpdb.headers,
-    {remote, Url, Headers -- DefaultHeaders}.
+    {remote, Url, Headers2 -- DefaultHeaders}.
 
 
-get_v4_endpoint(#httpdb{} = HttpDb) ->
+get_v4_endpoint(#{} = HttpDb) ->
     {remote, Url, Headers} = get_rep_endpoint(HttpDb),
     {{UserFromHeaders, _}, HeadersWithoutBasicAuth} =
         couch_replicator_utils:remove_basic_auth_from_headers(Headers),
@@ -140,7 +157,6 @@ get_v4_endpoint(#httpdb{} = HttpDb) ->
     User = pick_defined_value([UserFromUrl, UserFromHeaders]),
     OAuth = undefined, % Keep this to ensure checkpoints don't change
     {remote, User, Host, NonDefaultPort, Path, HeadersWithoutBasicAuth, OAuth}.
-
 
 pick_defined_value(Values) ->
     case [V || V <- Values, V /= undefined] of

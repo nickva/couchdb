@@ -15,7 +15,7 @@
 -behaviour(gen_server).
 
 -export([
-   start_link/1
+   start_link/3
 ]).
 
 -export([
@@ -39,17 +39,16 @@
     to_binary/1
 ]).
 
--import(couch_replicator_utils, [
-    pp_rep_id/1
-]).
-
 
 -define(LOWEST_SEQ, 0).
 -define(DEFAULT_CHECKPOINT_INTERVAL, 30000).
 -define(STARTUP_JITTER_DEFAULT, 5000).
 
 -record(rep_state, {
-    rep_details,
+    job,
+    job_data,
+    id,
+    base_id,
     source_name,
     target_name,
     source,
@@ -77,31 +76,32 @@
     use_checkpoints = true,
     checkpoint_interval = ?DEFAULT_CHECKPOINT_INTERVAL,
     type = db,
-    view = nil
+    view = nil,
+    user = null,
+    options = #{}
 }).
 
 
-start_link(#rep{id = {BaseId, Ext}, source = Src, target = Tgt} = Rep) ->
-    RepChildId = BaseId ++ Ext,
-    Source = couch_replicator_api_wrap:db_uri(Src),
-    Target = couch_replicator_api_wrap:db_uri(Tgt),
-    ServerName = {global, {?MODULE, Rep#rep.id}},
-
-    case gen_server:start_link(ServerName, ?MODULE, Rep, []) of
+start_link(#{] = Job, #{} = JobData) ->
+    case gen_server:start_link(?MODULE, {Job, JobData}, []) of
         {ok, Pid} ->
             {ok, Pid};
         {error, Reason} ->
-            couch_log:warning("failed to start replication `~s` (`~s` -> `~s`)",
-                           [RepChildId, Source, Target]),
+            #{?REP := Rep} = JobData,
+            {<<"id">> := Id, ?SOURCE := Src, ?TARGET := Ttg} = Rep,
+            Source = couch_replicator_api_wrap:db_uri(Src),
+            Target = couch_replicator_api_wrap:db_uri(Tgt),
+            ErrMsg = "failed to start replication `~s` (`~s` -> `~s`)",
+            couch_log:warning(ErrMsg, [RepId, Source, Target]),
             {error, Reason}
     end.
 
 
-init(InitArgs) ->
-    {ok, InitArgs, 0}.
+init({#{} = Job, #{} = JobData}) ->
+    {ok, {Job, JobData}, 0}.
 
 
-do_init(#rep{options = Options, id = {BaseId, Ext}, user_ctx=UserCtx} = Rep) ->
+do_init(#{} = Job, #{} = JobData) ->
     process_flag(trap_exit, true),
 
     timer:sleep(startup_jitter()),
@@ -113,8 +113,12 @@ do_init(#rep{options = Options, id = {BaseId, Ext}, user_ctx=UserCtx} = Rep) ->
         target_name = TargetName,
         start_seq = {_Ts, StartSeq},
         highest_seq_done = {_, HighestSeq},
-        checkpoint_interval = CheckpointInterval
-    } = State = init_state(Rep),
+        checkpoint_interval = CheckpointInterval,
+        user = User,
+        options = Options,
+        doc_id = DocId,
+        db_name = DbName
+    } = State = init_state(Job, JobData),
 
     NumWorkers = get_value(worker_processes, Options),
     BatchSize = get_value(worker_batch_size, Options),
@@ -145,10 +149,10 @@ do_init(#rep{options = Options, id = {BaseId, Ext}, user_ctx=UserCtx} = Rep) ->
 
     couch_task_status:add_task([
         {type, replication},
-        {user, UserCtx#user_ctx.name},
-        {replication_id, ?l2b(BaseId ++ Ext)},
-        {database, Rep#rep.db_name},
-        {doc_id, Rep#rep.doc_id},
+        {user, User},
+        {replication_id, State#rep_state.id},
+        {database, DbName},
+        {doc_id, DocId},
         {source, ?l2b(SourceName)},
         {target, ?l2b(TargetName)},
         {continuous, get_value(continuous, Options, false)},
@@ -156,16 +160,6 @@ do_init(#rep{options = Options, id = {BaseId, Ext}, user_ctx=UserCtx} = Rep) ->
         {checkpoint_interval, CheckpointInterval}
     ] ++ rep_stats(State)),
     couch_task_status:set_update_frequency(1000),
-
-    % Until OTP R14B03:
-    %
-    % Restarting a temporary supervised child implies that the original arguments
-    % (#rep{} record) specified in the MFA component of the supervisor
-    % child spec will always be used whenever the child is restarted.
-    % This implies the same replication performance tunning parameters will
-    % always be used. The solution is to delete the child spec (see
-    % cancel_replication/1) and then start the replication again, but this is
-    % unfortunately not immune to race conditions.
 
     log_replication_start(State),
     couch_log:debug("Worker pids are: ~p", [Workers]),
@@ -314,9 +308,10 @@ handle_info({'EXIT', Pid, Reason}, #rep_state{workers = Workers} = State) ->
         {stop, StopReason, State2}
     end;
 
-handle_info(timeout, InitArgs) ->
-    try do_init(InitArgs) of {ok, State} ->
-        {noreply, State}
+handle_info(timeout, {#{} = Job, #{} = JobData} = InitArgs) ->
+    try do_init(Job, JobData) of
+        {ok, State} ->
+            {noreply, State}
     catch
         exit:{http_request_failed, _, _, max_backoff} ->
             {stop, {shutdown, max_backoff}, {error, InitArgs}};
@@ -331,13 +326,12 @@ handle_info(timeout, InitArgs) ->
     end.
 
 
-terminate(normal, #rep_state{rep_details = #rep{id = RepId} = Rep,
-    checkpoint_history = CheckpointHistory} = State) ->
-    terminate_cleanup(State),
-    couch_replicator_notifier:notify({finished, RepId, CheckpointHistory}),
-    doc_update_completed(Rep, rep_stats(State));
+terminate(normal, #rep_state{} = State) ->
+    % Note: when terminating `normal`, the job was already marked as finished.
+    % if that fails then we'd end up in the error terminate clause
+    terminate_cleanup(State).
 
-terminate(shutdown, #rep_state{rep_details = #rep{id = RepId}} = State) ->
+terminate(shutdown, #rep_state{id = RepId} = State) ->
     % Replication stopped via _scheduler_sup:terminate_child/1, which can be
     % occur during regular scheduler operation or when job is removed from
     % the scheduler.
@@ -349,58 +343,57 @@ terminate(shutdown, #rep_state{rep_details = #rep{id = RepId}} = State) ->
             couch_log:error(LogMsg, [?MODULE, RepId, Error]),
             State
     end,
-    couch_replicator_notifier:notify({stopped, RepId, <<"stopped">>}),
+    finish_couch_job(State1, <<"stopped">>, null),
     terminate_cleanup(State1);
 
-terminate({shutdown, max_backoff}, {error, InitArgs}) ->
-    #rep{id = {BaseId, Ext} = RepId} = InitArgs,
+terminate({shutdown, max_backoff}, {error, {#{} = Job, #{} = JobData}}) ->
+    % Here we handle the case when replication fails during initialization.
+    % That is before the #rep_state{} is even built.
+    #{?REP := #{<<"id">> := RepId}} = JobData,
     couch_stats:increment_counter([couch_replicator, failed_starts]),
-    couch_log:warning("Replication `~s` reached max backoff ", [BaseId ++ Ext]),
-    couch_replicator_notifier:notify({error, RepId, max_backoff});
+    couch_log:warning("Replication `~s` reached max backoff ", [RepId]),
+    finish_couch_job(Job, JobData, <<"error">>, max_backoff);
 
-terminate({shutdown, {error, Error}}, {error, Class, Stack, InitArgs}) ->
-    #rep{
-        id = {BaseId, Ext} = RepId,
-        source = Source0,
-        target = Target0,
-        doc_id = DocId,
-        db_name = DbName
-    } = InitArgs,
+terminate({shutdown, {error, Error}}, {error, Class, Stack, {Job, JobData}}) ->
+    % Here we handle the case when replication fails during initialization.
+    #{?REP := Rep} = JobData,
+    #{
+       <<"id">> := Id,
+       ?SOURCE := Source0,
+       ?TARGET := Target0,
+       <<"doc_id">> := DocId,
+       <<"db_name">> := DbName
+    } = Rep,
     Source = couch_replicator_api_wrap:db_uri(Source0),
     Target = couch_replicator_api_wrap:db_uri(Target0),
-    RepIdStr = BaseId ++ Ext,
     Msg = "~p:~p: Replication ~s failed to start ~p -> ~p doc ~p:~p stack:~p",
-    couch_log:error(Msg, [Class, Error, RepIdStr, Source, Target, DbName,
+    couch_log:error(Msg, [Class, Error, RepId, Source, Target, DbName,
         DocId, Stack]),
     couch_stats:increment_counter([couch_replicator, failed_starts]),
-    couch_replicator_notifier:notify({error, RepId, Error});
+    finish_couch_job(Job, JobData, <<"error">>, Error);
 
-terminate({shutdown, max_backoff}, State) ->
+terminate({shutdown, max_backoff}, #rep_state{} = State) ->
     #rep_state{
+        id = RepId,
         source_name = Source,
         target_name = Target,
-        rep_details = #rep{id = {BaseId, Ext} = RepId}
     } = State,
     couch_log:error("Replication `~s` (`~s` -> `~s`) reached max backoff",
-        [BaseId ++ Ext, Source, Target]),
+        [RepId, Source, Target]),
     terminate_cleanup(State),
-    couch_replicator_notifier:notify({error, RepId, max_backoff});
-
-terminate({shutdown, Reason}, State) ->
-    % Unwrap so when reporting we don't have an extra {shutdown, ...} tuple
-    % wrapped around the message
-    terminate(Reason, State);
+    finish_couch_job(State, <<"error">>, max_backoff);
 
 terminate(Reason, State) ->
-#rep_state{
+    #rep_state{
+        id = RepId,
         source_name = Source,
         target_name = Target,
-        rep_details = #rep{id = {BaseId, Ext} = RepId}
     } = State,
     couch_log:error("Replication `~s` (`~s` -> `~s`) failed: ~s",
-        [BaseId ++ Ext, Source, Target, to_binary(Reason)]),
+        [RepId, Source, Target, to_binary(Reason)]),
     terminate_cleanup(State),
-    couch_replicator_notifier:notify({error, RepId, Reason}).
+    finish_couch_job(State, <<"error">>, Reason).
+
 
 terminate_cleanup(State) ->
     update_task(State),
@@ -414,22 +407,19 @@ code_change(_OldVsn, #rep_state{}=State, _Extra) ->
 
 format_status(_Opt, [_PDict, State]) ->
     #rep_state{
+       id = Id,
        source = Source,
        target = Target,
-       rep_details = RepDetails,
        start_seq = StartSeq,
        source_seq = SourceSeq,
        committed_seq = CommitedSeq,
        current_through_seq = ThroughSeq,
        highest_seq_done = HighestSeqDone,
-       session_id = SessionId
-    } = state_strip_creds(State),
-    #rep{
-       id = RepId,
-       options = Options,
+       session_id = SessionId,
        doc_id = DocId,
-       db_name = DbName
-    } = RepDetails,
+       db_name = DbName,
+       options = Options
+    } = state_strip_creds(State),
     [
         {rep_id, RepId},
         {source, couch_replicator_api_wrap:db_uri(Source)},
@@ -473,70 +463,105 @@ httpdb_strip_creds(LocalDb) ->
     LocalDb.
 
 
-rep_strip_creds(#rep{source = Source, target = Target} = Rep) ->
-    Rep#rep{
-        source = httpdb_strip_creds(Source),
-        target = httpdb_strip_creds(Target)
-    }.
-
-
-state_strip_creds(#rep_state{rep_details = Rep, source = Source, target = Target} = State) ->
-    % #rep_state contains the source and target at the top level and also
-    % in the nested #rep_details record
+state_strip_creds(#rep_state{source = Source, target = Target} = State) ->
     State#rep_state{
-        rep_details = rep_strip_creds(Rep),
         source = httpdb_strip_creds(Source),
         target = httpdb_strip_creds(Target)
     }.
 
 
-adjust_maxconn(Src = #httpdb{http_connections = 1}, RepId) ->
+adjust_maxconn(Src = #{<<"http_connections">> : = 1}, RepId) ->
     Msg = "Adjusting minimum number of HTTP source connections to 2 for ~p",
     couch_log:notice(Msg, [RepId]),
-    Src#httpdb{http_connections = 2};
+    Src#{<<"http_connections">> := 2};
 adjust_maxconn(Src, _RepId) ->
     Src.
 
 
--spec doc_update_triggered(#rep{}) -> ok.
-doc_update_triggered(#rep{db_name = null}) ->
+-spec doc_update_triggered(#rep_state{}) -> ok.
+doc_update_triggered(#rep_state{db_name = null}) ->
     ok;
-doc_update_triggered(#rep{id = RepId, doc_id = DocId} = Rep) ->
+doc_update_triggered(#rep_state{} = State) ->
+    #rep_state{id = Id, doc_id = DocId, db_name = DbName} = State,
     case couch_replicator_doc_processor:update_docs() of
         true ->
-            couch_replicator_docs:update_triggered(Rep, RepId);
+            couch_replicator_docs:update_triggered(Id, DocId, DbName);
         false ->
             ok
     end,
-    couch_log:notice("Document `~s` triggered replication `~s`",
-        [DocId, pp_rep_id(RepId)]),
+    couch_log:notice("Document `~s` triggered replication `~s`", [DocId, Id]),
     ok.
 
 
--spec doc_update_completed(#rep{}, list()) -> ok.
-doc_update_completed(#rep{db_name = null}, _Stats) ->
+-spec doc_update_completed(#rep_state{}) -> ok.
+doc_update_completed(#rep_state{db_name = null}) ->
     ok;
-doc_update_completed(#rep{id = RepId, doc_id = DocId, db_name = DbName,
-    start_time = StartTime}, Stats0) ->
-    Stats = Stats0 ++ [{start_time, couch_replicator_utils:iso8601(StartTime)}],
+doc_update_completed(#rep_state{} = State) ->
+    #rep_state{
+        id = Id,
+        doc_id = DocId,
+        db_name = DbName,
+        start_time = Start,
+        stats = Stats0
+    } = State,
+    Stats = Stats0 ++ [{start_time, couch_replicator_utils:iso8601(Start)}],
     couch_replicator_docs:update_doc_completed(DbName, DocId, Stats),
-    couch_log:notice("Replication `~s` completed (triggered by `~s`)",
-        [pp_rep_id(RepId), DocId]),
+    couch_log:notice("Replication `~s` completed (triggered by `~s:~s`)",
+        [Id, DbName, DocId]),
     ok.
 
 
 do_last_checkpoint(#rep_state{seqs_in_progress = [],
     highest_seq_done = {_Ts, ?LOWEST_SEQ}} = State) ->
-    {stop, normal, cancel_timer(State)};
+    History = State#rep_state.checkoint_history,
+    Result = case finish_couch_job(State, <<"completed">>, History) of
+        ok -> normal;
+        {error, _} = Error -> Error
+    end,
+    {stop, Result, cancel_timer(State)};
 do_last_checkpoint(#rep_state{seqs_in_progress = [],
     highest_seq_done = Seq} = State) ->
     case do_checkpoint(State#rep_state{current_through_seq = Seq}) of
     {ok, NewState} ->
         couch_stats:increment_counter([couch_replicator, checkpoints, success]),
-        {stop, normal, cancel_timer(NewState)};
+        History = NewState#rep_state.checkpoint_history,
+        Result = case finish_couch_job(NewState, <<"completed">>, History) of
+            ok -> normal;
+            {error, _} = Error -> Error
+        end,
+        {stop, Result, cancel_timer(NewState)};
     Error ->
         couch_stats:increment_counter([couch_replicator, checkpoints, failure]),
         {stop, Error, State}
+    end.
+
+
+finish_couch_job(#rep_state{} = State, FinishedState, Result) ->
+    #rep_state{job = Job, job_data = Jobdata} = State,
+    finish_couch_job(Job, JobData, FinishedState, Result).
+
+
+finish_couch_job(#{} = Job, #{} = JobData, FinishState, Result0) ->
+    #{?REP := #{<<"id">> := RepId}} = JobData,
+    case Result of
+        null -> null;
+        #{} -> Result0;
+        <<_/binary>> -> Result0;
+        Atom when is_atom(Atom) -> atom_to_binary(Atom, utf8)
+        Other -> couch_replicator_utils:rep_error_to_binary(Result0)
+    end,
+    JobData= JobData0#{
+        ?FINISHED_STATE => FinishState,
+        ?FINISHED_RESULT => Result
+    },
+    case couch_jobs:finish(undefined, Job, JobData) of
+        ok ->
+            doc_update_completed(State),
+            ok;
+        {error, Error} ->
+            Msg = "Replication ~s job could not finish. Error:~p",
+            couch_log:error(Msg, [RepId, Error]),
+            {error, Error}
     end.
 
 
@@ -558,21 +583,31 @@ cancel_timer(#rep_state{timer = Timer} = State) ->
     State#rep_state{timer = nil}.
 
 
-init_state(Rep) ->
-    #rep{
-        id = {BaseId, _Ext},
-        source = Src0, target = Tgt,
-        options = Options,
-        type = Type, view = View,
-        start_time = StartTime,
-        stats = ArgStats0
+init_state(#{} = Job, #{?REP =: Rep}} = JobData) ->
+    #{
+        <<"id">> := Id,
+        <<"base_id">> := BaseId,
+        ?SOURCE := Src0,
+        ?TARGET := Tgt,
+        <<"type">> := Type,
+        <<"view">> := View,
+        <<"start_time">> := StartTime,
+        <<"stats">> := ArgStats0,
+        <<"options">> := OptionsMap,
+        <<"db_name">> := DbName,
+        <<"doc_id">> := DocId,
     } = Rep,
+
+    Options = maps:fold(fun(K, V, Acc) ->
+        [{binary_to_atom(K, utf8), V} | Acc]
+    end, [], OptionsMap),
+
     % Adjust minimum number of http source connections to 2 to avoid deadlock
     Src = adjust_maxconn(Src0, BaseId),
     {ok, Source} = couch_replicator_api_wrap:db_open(Src),
-    {CreateTargetParams} = get_value(create_target_params, Options, {[]}),
-    {ok, Target} = couch_replicator_api_wrap:db_open(Tgt,
-        get_value(create_target, Options, false), CreateTargetParams),
+    CreateTgt = get_value(create_target, Options, false),
+    TParams = maps:to_list(get_value(create_target_params, Options, #{}),
+    {ok, Target} = couch_replicator_api_wrap:db_open(Tgt, CreateTgt, TParams),
 
     {ok, SourceInfo} = couch_replicator_api_wrap:get_db_info(Source),
     {ok, TargetInfo} = couch_replicator_api_wrap:get_db_info(Target),
@@ -595,7 +630,10 @@ init_state(Rep) ->
 
     #doc{body={CheckpointHistory}} = SourceLog,
     State = #rep_state{
-        rep_details = Rep,
+        job = Job,
+        job_data = JobData,
+        id = Id,
+        base_id = BaseId,
         source_name = couch_replicator_api_wrap:db_uri(Source),
         target_name = couch_replicator_api_wrap:db_uri(Target),
         source = Source,
@@ -612,25 +650,26 @@ init_state(Rep) ->
         tgt_starttime = get_value(<<"instance_start_time">>, TargetInfo),
         session_id = couch_uuids:random(),
         source_seq = SourceSeq,
-        use_checkpoints = get_value(use_checkpoints, Options, true),
-        checkpoint_interval = get_value(checkpoint_interval, Options,
-                                        ?DEFAULT_CHECKPOINT_INTERVAL),
+        use_checkpoints = get_value(use_checkpoints, Options),
+        checkpoint_interval = get_value(checkpoint_interval, Options),
         type = Type,
         view = View,
         stats = Stats
+        doc_id = DocId,
+        db_name = DbName
     },
     State#rep_state{timer = start_timer(State)}.
 
 
-find_and_migrate_logs(DbList, #rep{id = {BaseId, _}} = Rep) ->
+find_and_migrate_logs(DbList, #{<<"base_id">> := BaseId} = Rep) ->
     LogId = ?l2b(?LOCAL_DOC_PREFIX ++ BaseId),
-    fold_replication_logs(DbList, ?REP_ID_VERSION, LogId, LogId, Rep, []).
+    fold_replication_logs(DbList, ?REP_ID_VERSION, LogId, LogId, State, []).
 
 
 fold_replication_logs([], _Vsn, _LogId, _NewId, _Rep, Acc) ->
     lists:reverse(Acc);
 
-fold_replication_logs([Db | Rest] = Dbs, Vsn, LogId, NewId, Rep, Acc) ->
+fold_replication_logs([Db | Rest] = Dbs, Vsn, LogId, NewId, #{} = Rep, Acc) ->
     case couch_replicator_api_wrap:open_doc(Db, LogId, [ejson_body]) of
     {error, <<"not_found">>} when Vsn > 1 ->
         OldRepId = couch_replicator_utils:replication_id(Rep, Vsn - 1),
@@ -650,8 +689,8 @@ fold_replication_logs([Db | Rest] = Dbs, Vsn, LogId, NewId, Rep, Acc) ->
     end.
 
 
-maybe_save_migrated_log(Rep, Db, #doc{} = Doc, OldId) ->
-    case get_value(use_checkpoints, Rep#rep.options, true) of
+maybe_save_migrated_log(#{<<"options">> = Options}, Db, #doc{} = Doc, OldId) ->
+    case maps:get(<<"use_checkpoints">>, Options) of
         true ->
             update_checkpoint(Db, Doc),
             Msg = "Migrated replication checkpoint. Db:~p ~p -> ~p",
@@ -714,7 +753,7 @@ do_checkpoint(State) ->
         src_starttime = SrcInstanceStartTime,
         tgt_starttime = TgtInstanceStartTime,
         stats = Stats,
-        rep_details = #rep{options = Options},
+        options = Options,
         session_id = SessionId
     } = State,
     case commit_to_both(Source, Target) of
@@ -922,9 +961,8 @@ has_session_id(SessionId, [{Props} | Rest]) ->
     end.
 
 
-get_pending_count(St) ->
-    Rep = St#rep_state.rep_details,
-    Timeout = get_value(connection_timeout, Rep#rep.options),
+get_pending_count(#rep_state{options = Options} = St) ->
+    Timeout = get_value(connection_timeout, Options),
     TimeoutMicro = Timeout * 1000,
     case get(pending_count_state) of
         {LastUpdate, PendingCount} ->
@@ -1005,24 +1043,21 @@ replication_start_error(Error) ->
     Error.
 
 
-log_replication_start(#rep_state{rep_details = Rep} = RepState) ->
-    #rep{
-       id = {BaseId, Ext},
-       doc_id = DocId,
-       db_name = DbName,
-       options = Options
-    } = Rep,
-    Id = BaseId ++ Ext,
+log_replication_start(#rep_state{} = RepState) ->
+    #rep_state{
+        id = Id,
+        doc_id = DocId,
+        db_name = DbName,
+        options = Options,
+        source_name = Source,
+        target_name = Target,
+        session_id = Sid,
+    } = RepState,
     Workers = get_value(worker_processes, Options),
     BatchSize = get_value(worker_batch_size, Options),
-    #rep_state{
-       source_name = Source,  % credentials already stripped
-       target_name = Target,  % credentials already stripped
-       session_id = Sid
-    } = RepState,
     From = case DbName of
-        ShardName when is_binary(ShardName) ->
-            io_lib:format("from doc ~s:~s", [mem3:dbname(ShardName), DocId]);
+        Name when is_binary(Name) ->
+            io_lib:format("from doc ~s:~s", [Name, DocId]);
         _ ->
             "from _replicate endpoint"
     end,
@@ -1055,14 +1090,13 @@ scheduler_job_format_status_test() ->
     Target = <<"http://u:p@h2/d2">>,
     Rep = #rep{
         id = {"base", "+ext"},
-        source = couch_replicator_docs:parse_rep_db(Source, [], []),
-        target = couch_replicator_docs:parse_rep_db(Target, [], []),
+        source = couch_replicator_docs:parse_rep_db(Source, #{}, #{}),
+        target = couch_replicator_docs:parse_rep_db(Target, #{}, #{}),
         options = [{create_target, true}],
         doc_id = <<"mydoc">>,
         db_name = <<"mydb">>
     },
     State = #rep_state{
-        rep_details = Rep,
         source = Rep#rep.source,
         target = Rep#rep.target,
         session_id = <<"a">>,

@@ -17,7 +17,7 @@
 %% public api
 -export([
     start_link/0,
-    start_child/1,
+    start_child/2,
     terminate_child/1
 ]).
 
@@ -37,8 +37,8 @@ start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 
-start_child(#rep{} = Rep) ->
-    supervisor:start_child(?MODULE, [Rep]).
+start_child(#{} = Job, #{} = Rep) ->
+    supervisor:start_child(?MODULE, [Job, Rep]).
 
 
 terminate_child(Pid) ->

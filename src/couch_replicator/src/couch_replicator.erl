@@ -14,6 +14,7 @@
 
 -export([
     replicate/2,
+    ensure_rep_db_exists/0,
     replication_states/0,
     job/1,
     doc/3,
@@ -51,80 +52,83 @@
     {ok, {cancelled, binary()}} |
     {error, any()} |
     no_return().
-replicate(PostBody, Ctx) ->
-    {ok, Rep0} = couch_replicator_utils:parse_rep_doc(PostBody, Ctx),
-    Rep = Rep0#rep{start_time = os:timestamp()},
-    #rep{id = RepId, options = Options, user_ctx = UserCtx} = Rep,
-    case get_value(cancel, Options, false) of
-    true ->
-        CancelRepId = case get_value(id, Options, nil) of
-        nil ->
-            RepId;
-        RepId2 ->
-            RepId2
-        end,
-        case check_authorization(CancelRepId, UserCtx) of
-        ok ->
-            cancel_replication(CancelRepId);
-        not_found ->
-            {error, not_found}
-        end;
-    false ->
-        check_authorization(RepId, UserCtx),
-        {ok, Listener} = rep_result_listener(RepId),
-        Result = do_replication_loop(Rep),
-        couch_replicator_notifier:stop(Listener),
-        Result
+replicate(PostBody, #user_ctx{name = UserName}) ->
+    {ok, Rep0} = couch_replicator_utils:parse_rep_doc(PostBody, UserName),
+    Rep = Rep0#{<<"start_time">> => erlang:system_time()},
+    #{<<"id">> := RepId, <<"options">> := Options} = Rep,
+    case maps:get(<<"cancel">>, Options, false) of
+        true ->
+            CancelRepId = case maps:get(<<"id">>, Options, nil) of
+                nil -> RepId;
+                RepId2 -> RepId2
+            end,
+            case check_authorization(CancelRepId, UserCtx) of
+                ok -> cancel_replication(CancelRepId);
+                not_found -> {error, not_found}
+            end;
+        false ->
+            check_authorization(RepId, UserCtx),
+            ok = couch_replicator_scheduler:add_job(Rep),
+            case maps:get(<<"continuous">>, Options, false) of
+                true -> {ok, {continuous, Id}};
+                false -> wait_for_result(Id)
+            end
     end.
 
 
--spec do_replication_loop(#rep{}) ->
-    {ok, {continuous, binary()}} | {ok, tuple()} | {error, any()}.
-do_replication_loop(#rep{id = {BaseId, Ext} = Id, options = Options} = Rep) ->
-    ok = couch_replicator_scheduler:add_job(Rep),
-    case get_value(continuous, Options, false) of
-    true ->
-        {ok, {continuous, ?l2b(BaseId ++ Ext)}};
-    false ->
-        wait_for_result(Id)
-    end.
-
-
--spec rep_result_listener(rep_id()) -> {ok, pid()}.
-rep_result_listener(RepId) ->
-    ReplyTo = self(),
-    {ok, _Listener} = couch_replicator_notifier:start_link(
-        fun({_, RepId2, _} = Ev) when RepId2 =:= RepId ->
-                ReplyTo ! Ev;
-            (_) ->
-                ok
-        end).
+% This is called from supervisor. Must respect supervisor protocol so
+% it returns `ignore`.
+-spec ensure_rep_db_exists() -> ignore.
+ensure_rep_db_exists() ->
+    couch_jobs:set_type_timeout(?REP_DOCS, ?REP_DOCS_TIMEOUT_MSEC),
+    couch_jobs:set_type_timeout(?REP_JOBS, ?REP_JOBS_TIMEOUT_MSEC),
+    case config:get_boolean("replicator", "create_replicator_db", false) of
+        true ->
+            ok = couch_replicator_docs:ensure_rep_db_exists();
+        false ->
+            ok
+    end,
+    ignore.
 
 
 -spec wait_for_result(rep_id()) ->
     {ok, {[_]}} | {error, any()}.
 wait_for_result(RepId) ->
-    receive
-    {finished, RepId, RepResult} ->
-        {ok, RepResult};
-    {error, RepId, Reason} ->
-        {error, Reason}
+    FinishRes = case couch_jobs:subscribe(?REP_JOBS, RepId) of
+        {ok, finished, JobData} ->
+            {ok, JobData};
+        {ok, SubId, _, _} ->
+            case couch_jobs:wait(SubId, finished, infinity) of
+                {?REP_JOBS, RepId, finished, JobData} -> {ok, JobData};
+                timeout -> timeout
+            end;
+        {error, Error} ->
+            {error, Error}
+    end,
+    case FinishRes of
+       {ok, #{<<"finished_result">> := CheckpointHistory}} ->
+            {ok, CheckpointHistory};
+       timeout ->
+            {error, timeout};
+       {error, Error} ->
+            {error, Error}
     end.
 
 
 -spec cancel_replication(rep_id()) ->
     {ok, {cancelled, binary()}} | {error, not_found}.
-cancel_replication({BasedId, Extension} = RepId) ->
-    FullRepId = BasedId ++ Extension,
-    couch_log:notice("Canceling replication '~s' ...", [FullRepId]),
-    case couch_replicator_scheduler:rep_state(RepId) of
-    #rep{} ->
-        ok = couch_replicator_scheduler:remove_job(RepId),
-        couch_log:notice("Replication '~s' cancelled", [FullRepId]),
-        {ok, {cancelled, ?l2b(FullRepId)}};
-    nil ->
-        couch_log:notice("Replication '~s' not found", [FullRepId]),
-        {error, not_found}
+cancel_replication(RepId) when is_binary(RepId) ->
+    couch_log:notice("Canceling replication '~s' ...", [RepId]),
+    case couch_jobs:get_job_data(undefined, ?REP_JOBS, RepId) of
+        {error_not, found} ->
+            {error, not_found};
+        #{<<"rep">> := #{<<"db_name">> := null}} ->
+            couch_jobs:remove(undefined, ?REP_JOBS, RepId)
+            {ok, {cancelled, ?l2b(FullRepId)}};
+        #{<<"rep">> := #{}} ->
+            % Job was started from a replicator doc canceling via _replicate
+            % doesn't quite make sense, instead replicator should be deleted.
+            {error, not_found}
     end.
 
 
@@ -133,11 +137,11 @@ replication_states() ->
     ?REPLICATION_STATES.
 
 
--spec strip_url_creds(binary() | {[_]}) -> binary().
+-spec strip_url_creds(binary() | #{}) -> binary().
 strip_url_creds(Endpoint) ->
     try
-        couch_replicator_docs:parse_rep_db(Endpoint, [], []) of
-            #httpdb{url = Url} ->
+        couch_replicator_docs:parse_rep_db(Endpoint, #{}, #{}) of
+            #{<<"url">> := Url} ->
                 iolist_to_binary(couch_util:url_strip_password(Url))
     catch
         throw:{error, local_endpoints_not_supported} ->
@@ -250,9 +254,8 @@ info_from_doc(RepDb, {Props}) ->
                         end
             end;
         failed ->
-            Info = get_value(<<"_replication_state_reason">>, Props, nil),
-            EJsonInfo = couch_replicator_utils:ejson_state_info(Info),
-            {State0, EJsonInfo, 1, StateTime};
+            Info = get_value(<<"_replication_state_reason">>, Props, null),
+            {State0, Info, 1, StateTime};
         _OtherState ->
             {null, null, 0, null}
     end,
@@ -280,13 +283,13 @@ state_atom(State) when is_atom(State) ->
 
 -spec check_authorization(rep_id(), #user_ctx{}) -> ok | not_found.
 check_authorization(RepId, #user_ctx{name = Name} = Ctx) ->
-    case couch_replicator_scheduler:rep_state(RepId) of
-    #rep{user_ctx = #user_ctx{name = Name}} ->
-        ok;
-    #rep{} ->
-        couch_httpd:verify_is_server_admin(Ctx);
-    nil ->
-        not_found
+    case couch_jobs:get_job_data(undefined, ?REP_JOBS, RePid) of
+        {error_not, found} ->
+            not_found;
+        #{<<"rep">> := {<<"user">> := Name}} ->
+            ok;
+        #{} ->
+            couch_httpd:verify_is_server_admin(Ctx)
     end.
 
 
@@ -336,23 +339,14 @@ t_replication_not_found() ->
     end).
 
 
-expect_rep_user_ctx(Name, Role) ->
-    meck:expect(couch_replicator_scheduler, rep_state,
-        fun(_Id) ->
-            UserCtx = #user_ctx{name = Name, roles = [Role]},
-            #rep{user_ctx = UserCtx}
-        end).
-
 
 strip_url_creds_test_() ->
      {
-        setup,
-        fun() ->
-            meck:expect(config, get, fun(_, _, Default) -> Default end)
+        foreach,
+        fun () -> meck:expect(config, get,
+            fun(_, _, Default) -> Default end)
         end,
-        fun(_) ->
-            meck:unload()
-        end,
+        fun (_) -> meck:unload() end,
         [
             t_strip_http_basic_creds(),
             t_strip_http_props_creds(),
