@@ -19,6 +19,7 @@
     remove/3,
     get_job_data/3,
     get_job_state/3,
+    fold_jobs/4
 
     % Job processing
     accept/1,
@@ -101,6 +102,16 @@ get_job_state(Tx, Type, JobId) when is_binary(JobId) ->
             {error, Error} ->
                 {error, Error}
         end
+    end).
+
+
+-spec fold_jobs(jtx(), job_type(), fun(), any()) -> any().
+fold_jobs(Tx, Type, Fun, UserAcc) when is_function(Fun, 4) ->
+    couch_jobs_fdb:tx(couch_jobs_fdb:get_jtx(Tx), fun(JTX) ->
+        lists:foldl(fun(#{JobId => {_Seq, JobState, DataEnc}}, Acc) ->
+            Data = couch_jobs_fdb:decode(DataEnc),
+            Fun({JTx, JobId, JobState, Data}, Acc)
+        end, UserAcc, couch_jobs_fdb:get_jobs(JTx, Type))
     end).
 
 
