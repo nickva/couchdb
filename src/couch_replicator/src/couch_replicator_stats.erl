@@ -32,9 +32,21 @@
 new() ->
     orddict:new().
 
+new(#{} = Map) ->
+    AtomKeysMap = maps:fold(fun
+        (K, V, Acc) when is_binary(K) ->
+            K1 = binary_to_existing_atom(K, utf8),
+            Acc#{K1 => V};
+        (K, V, Acc) when is_atom(K) ->
+            Acc#{K => V}
+    end, #{}, Map),
+    maps:to_list(AtomKeysMap);
 new(Initializers0) when is_list(Initializers0) ->
     Initializers1 = lists:filtermap(fun fmap/1, Initializers0),
     orddict:from_list(Initializers1).
+
+to_json(Stats) ->
+    maps:from_list(Stats).
 
 missing_checked(Stats) ->
     get(missing_checked, Stats).
