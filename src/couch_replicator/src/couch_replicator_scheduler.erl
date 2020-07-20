@@ -40,8 +40,7 @@
    health_threshold/0,
    jobs/0,
    job/1,
-   restart_job/1,
-   update_job_stats/2
+   restart_job/1
 ]).
 
 %% config_listener callbacks
@@ -217,11 +216,6 @@ restart_job(JobId) ->
     end.
 
 
--spec update_job_stats(job_id(), term()) -> ok.
-update_job_stats(JobId, Stats) ->
-    gen_server:cast(?MODULE, {update_job_stats, JobId, Stats}).
-
-
 %% gen_server functions
 
 init(_) ->
@@ -290,16 +284,6 @@ handle_cast({set_interval, Interval}, State) when is_integer(Interval),
         Interval > 0 ->
     couch_log:notice("~p: interval set to ~B", [?MODULE, Interval]),
     {noreply, State#state{interval = Interval}};
-
-handle_cast({update_job_stats, JobId, Stats}, State) ->
-    case rep_state(JobId) of
-        nil ->
-            ok;
-        #rep{} = Rep ->
-            NewRep = Rep#rep{stats = Stats},
-            true = ets:update_element(?MODULE, JobId, {#job.rep, NewRep})
-    end,
-    {noreply, State};
 
 handle_cast(UnexpectedMsg, State) ->
     couch_log:error("~p: received un-expected cast ~p", [?MODULE, UnexpectedMsg]),
@@ -1445,7 +1429,6 @@ t_job_summary_running() ->
         ?assertEqual(0, proplists:get_value(error_count, Summary)),
 
         Stats = [{source_seq, <<"1-abc">>}],
-        handle_cast({update_job_stats, job1, Stats}, mock_state(1)),
         Summary1 = job_summary(job1, ?DEFAULT_HEALTH_THRESHOLD_SEC),
         ?assertEqual({Stats}, proplists:get_value(info, Summary1))
     end).
@@ -1466,7 +1449,6 @@ t_job_summary_pending() ->
         ?assertEqual(0, proplists:get_value(error_count, Summary)),
 
         Stats = [{doc_write_failures, 1}],
-        handle_cast({update_job_stats, job1, Stats}, mock_state(1)),
         Summary1 = job_summary(job1, ?DEFAULT_HEALTH_THRESHOLD_SEC),
         ?assertEqual({Stats}, proplists:get_value(info, Summary1))
     end).
