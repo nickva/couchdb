@@ -90,7 +90,7 @@ fetch(DDocName, FilterName, Source) ->
 % Get replication type and view (if any) from replication document props
 -spec view_type(#{}, [_]) ->
     {binary(), #{}} | {error, binary()}.
-view_type(#{<<"filter">> := <<"_view">>}, Options) ->
+view_type(#{?FILTER := <<"_view">>}, Options) ->
     {QP}  = couch_util:get_value(query_params, Options, {[]}),
     ViewParam = couch_util:get_value(<<"view">>, QP),
     case re:split(ViewParam, <<"/">>) of

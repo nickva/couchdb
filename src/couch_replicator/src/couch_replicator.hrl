@@ -13,8 +13,8 @@
 -define(REP_ID_VERSION, 4).
 
 % Couch jobs types and timeouts
--define(REP_DOCS, <<"repdocs">>).
--define(REP_JOBS, <<"repjobs">>).
+-define(REP_DOCS, <<"rep_docs">>).
+-define(REP_JOBS, <<"rep_jobs">>).
 -define(REP_DOCS_TIMEOUT_MSEC, 17000).
 -define(REP_JOBS_TIMEOUT_MSEC, 33000).
 
@@ -29,6 +29,9 @@
 -define(URL, <<"url">>).
 -define(AUTH, <<"auth">>).
 -define(HEADERS, <<"headers">>).
+-define(PROXY, <<"proxy">>).
+-define(SOURCE_PROXY, <<"source_proxy">>).
+-define(TARGET_PROXY, <<"target_proxy">>).
 
 % Replication states
 -define(ST_ERROR, <<"error">>).
@@ -42,14 +45,18 @@
 -define(ST_TRIGGERED, <<"triggered">>).
 
 % Some fields from a rep object
--define(REP_ID, <<"id">>).
+-define(REP_ID, <<"rep_id">>).
+-define(BASE_ID, <<"base_id">>).
 -define(DB_NAME, <<"db_name">>).
 -define(DOC_ID, <<"doc_id">>).
+-define(REP_USER, <<"rep_user">>).
 -define(START_TIME, <<"start_time">>).
+-define(OPTIONS, <<"options">>).
 
-% Fields couch job data objects
+% Fields for couch job data objects
 -define(REP, <<"rep">>).
 -define(REP_PARSE_ERROR, <<"rep_parse_error">>).
+-defene(REP_STATS, <<"rep_stats">>).
 -define(STATE, <<"state">>).
 -define(STATE_INFO, <<"state_info">>).
 -define(DOC_STATE, <<"doc_state">>).
@@ -58,7 +65,6 @@
 -define(ERROR_COUNT, <<"error_count">>).
 -define(LAST_UPDATED, <<"last_updated">>).
 -define(HISTORY, <<"history">>).
--define(VER, <<"ver">>).
 
 % Accepted job message tag
 -define(ACCEPTED_JOB, accepted_job).

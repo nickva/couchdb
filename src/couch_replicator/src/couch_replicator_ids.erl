@@ -30,7 +30,7 @@
 %  {filter_fetch_error, Error} exception.
 %
 
-replication_id(#{<<"options">> := Options} = Rep) ->
+replication_id(#{?OPTIONS := Options} = Rep) ->
     BaseId = replication_id(Rep, ?REP_ID_VERSION),
     UseOpts = [<<"continuous">>, <<"create_target">>]
     {BaseId, maybe_append_options(UseOpts, Options)}.
@@ -40,19 +40,19 @@ replication_id(#{<<"options">> := Options} = Rep) ->
 % If a change is made to how replications are identified,
 % please add a new clause and increase ?REP_ID_VERSION.
 
-replication_id(#{<<"source">> := Src, <<"target">> := Tgt} = Rep, 4) ->
+replication_id(#{?SOURCE := Src, ?TARGET := Tgt} = Rep, 4) ->
     UUID = couch_server:get_uuid(),
     SrcInfo = get_v4_endpoint(Src),
     TgtInfo = get_v4_endpoint(Tgt),
     maybe_append_filters([UUID, SrcInfo, TgtInfo], Rep);
 
-replication_id(#{<<"source">> := Src0, <<"target">> := Tgt0} = Rep, 3) ->
+replication_id(#{?SOURCE := Src0, ?TARGET := Tgt0} = Rep, 3) ->
     UUID = couch_server:get_uuid(),
     Src = get_rep_endpoint(Src0),
     Tgt = get_rep_endpoint(Tgt0),
     maybe_append_filters([UUID, Src, Tgt], Rep);
 
-replication_id(#{<<"source">> := Src0, <<"target">> := Tgt0} = Rep, 2) ->
+replication_id(#{?SOURCE := Src0, ?TARGET := Tgt0} = Rep, 2) ->
     {ok, HostName} = inet:gethostname(),
     Port = case (catch mochiweb_socket_server:get(couch_httpd, port)) of
     P when is_number(P) ->
@@ -69,7 +69,7 @@ replication_id(#{<<"source">> := Src0, <<"target">> := Tgt0} = Rep, 2) ->
     Tgt = get_rep_endpoint(Tgt0),
     maybe_append_filters([HostName, Port, Src, Tgt], Rep);
 
-replication_id(#{<<"source">> := Src0, <<"target">> := Tgt0} = Rep, 1) ->
+replication_id(#{?SOURCE := Src0, ?TARGET := Tgt0} = Rep, 1) ->
     {ok, HostName} = inet:gethostname(),
     Src = get_rep_endpoint(Src0),
     Tgt = get_rep_endpoint(Tgt0),
@@ -98,8 +98,8 @@ convert({BaseId, Ext} = Id) when is_binary(BaseId), is_binary(Ext) ->
 
 maybe_append_filters(Base, #{} = Rep) ->
     #{
-        <<"source">> := Source,
-        <<"options">> := Options
+        ?SOURCE := Source,
+        ?OPTIONS := Options
     } = Rep,
     Base2 = Base ++
         case couch_replicator_filters:parse(Options) of

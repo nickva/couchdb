@@ -54,8 +54,8 @@
     no_return().
 replicate(PostBody, #user_ctx{name = UserName}) ->
     {ok, Rep0} = couch_replicator_utils:parse_rep_doc(PostBody, UserName),
-    Rep = Rep0#{<<"start_time">> => erlang:system_time()},
-    #{<<"id">> := RepId, <<"options">> := Options} = Rep,
+    Rep = Rep0#{?START_TIME => erlang:system_time()},
+    #{?REP_ID := RepId, ?OPTIONS := Options} = Rep,
     case maps:get(<<"cancel">>, Options, false) of
         true ->
             CancelRepId = case maps:get(<<"id">>, Options, nil) of
@@ -122,10 +122,10 @@ cancel_replication(RepId) when is_binary(RepId) ->
     case couch_jobs:get_job_data(undefined, ?REP_JOBS, RepId) of
         {error_not, found} ->
             {error, not_found};
-        #{<<"rep">> := #{<<"db_name">> := null}} ->
+        #{?REP := #{?DB_NAME := null}} ->
             couch_jobs:remove(undefined, ?REP_JOBS, RepId)
             {ok, {cancelled, ?l2b(FullRepId)}};
-        #{<<"rep">> := #{}} ->
+        #{?REP := #{}} ->
             % Job was started from a replicator doc canceling via _replicate
             % doesn't quite make sense, instead replicator should be deleted.
             {error, not_found}
@@ -286,7 +286,7 @@ check_authorization(RepId, #user_ctx{name = Name} = Ctx) ->
     case couch_jobs:get_job_data(undefined, ?REP_JOBS, RePid) of
         {error_not, found} ->
             not_found;
-        #{<<"rep">> := {<<"user">> := Name}} ->
+        #{?REP := {?REP_USER := Name}} ->
             ok;
         #{} ->
             couch_httpd:verify_is_server_admin(Ctx)
