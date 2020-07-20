@@ -48,6 +48,7 @@
 -define(REP_ID, <<"rep_id">>).
 -define(BASE_ID, <<"base_id">>).
 -define(DB_NAME, <<"db_name">>).
+-define(DB_UUID, <<"db_uuid">>).
 -define(DOC_ID, <<"doc_id">>).
 -define(REP_USER, <<"rep_user">>).
 -define(START_TIME, <<"start_time">>).
