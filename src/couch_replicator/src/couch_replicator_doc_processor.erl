@@ -28,8 +28,9 @@
 ]).
 
 -export([
-    during_doc_update/3,
-    after_db_delete/1
+    after_db_create/2,
+    after_db_delete/2,
+    after_doc_write/6
 ]).
 
 -export([
@@ -62,15 +63,24 @@
 -define(MAX_JOBS, 500).
 
 
-during_doc_update(#doc{} = Doc, Db, _UpdateType) ->
+% EPI db monitoring plugin callbacks
+
+after_db_create(DbName, DbUUID) ->
+    couch_stats:increment_counter([couch_replicator, docs, dbs_created]),
+    add_replications_by_dbname(DbName, DbUUID).
+
+
+after_db_delete(DbName, DbUUID) ->
+    couch_stats:increment_counter([couch_replicator, docs, dbs_deleted]),
+    remove_replications_by_dbname(DbName, UUID)).
+
+
+after_doc_write(Db, #doc{} = Doc, _NewWinner, _OldWinner, _NewRevId, _Seq) ->
     couch_stats:increment_counter([couch_replicator, docs, db_changes]),
     ok = process_change(Db, Doc).
 
 
-after_db_delete(#{name := DbName}) ->
-    couch_stats:increment_counter([couch_replicator, docs, dbs_deleted]),
-    remove_replications_by_dbname(DbName).
-
+% Process replication doc updates
 
 process_change(_Db, #doc{id = <<?DESIGN_DOC_PREFIX, _/binary>>}) ->
     ok;
@@ -446,15 +456,19 @@ schedule_error_backoff(JTx, Job, ErrorCount) ->
     couch_jobs:resubmit(JTx, Job, trunc(When)).
 
 
-schedule_filter_check(JTx, Job, #{<<"filter_type">> := <<"user">>} = Rep) ->
-    IntervalSec = filter_check_interval_sec(),
-    NowSec = erlang:system_time(second),
-    When = NowSec + 0.5 * IntervalSec + rand:uniform(IntervalSec),
-    couch_jobs:resubmit(JTx, Job, trunc(When)).
-
-schedule_filter_check(_JTx, _Job, #{}) ->
-    ok.
-
+schedule_filter_check(JTx, Job, #{} = Rep) ->
+    #{?OPTIONS := Opts} = Rep,
+    case couch_replicator_filter:parse(Opts) of
+        {ok, {user, _FName, _QP}} ->
+            % For user filters, we have to periodically check the source
+            % in case the filter defintion has changed
+            IntervalSec = filter_check_interval_sec(),
+            NowSec = erlang:system_time(second),
+            When = NowSec + 0.5 * IntervalSec + rand:uniform(IntervalSec),
+            couch_jobs:resubmit(JTx, Job, trunc(When));
+        _ ->
+            ok
+    end.
 
 remove_old_state_fields(#{?DOC_STATE := DocState} = RepDocData) when
         DocState =:= ?TRIGGERED orelse DocState =:= ?ERROR ->
@@ -636,6 +650,7 @@ add_rep_doc_job(Tx, DbName, DocId, Rep, RepParseError) ->
                 ?STATE => ?ST_INITIALIZING,
                 ?STATE_INFO => RepParseError
                 ?ERROR_COUNT => 0,
+                ?REP_STATS => #{},
                 ?LAST_UPDATED => erlang:system_time()
             };
         #{} ->
@@ -644,6 +659,7 @@ add_rep_doc_job(Tx, DbName, DocId, Rep, RepParseError) ->
                 ?STATE => ?ST_INITIALIZING,
                 ?ERROR_COUNT => 0,
                 ?LAST_UPDATED => erlang:system_time(),
+                ?REP_STATS => #{},
                 ?STATE_INFO => null
             }
     end,
