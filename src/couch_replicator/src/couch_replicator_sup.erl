@@ -59,5 +59,5 @@ init(_Args) ->
             brutal_kill,
             worker,
             [couch_replicator]}
-    ],
+    ] ++ couch_epi:register_service(couch_replicator_api, []),
     {ok, {{rest_for_one,10,1}, Children}}.
