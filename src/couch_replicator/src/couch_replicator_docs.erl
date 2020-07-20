@@ -51,15 +51,14 @@
 
 
 -define(REP_DB_NAME, <<"_replicator">>).
--define(REP_DESIGN_DOC, <<"_design/_replicator">>).
 -define(OWNER, <<"owner">>).
 -define(CTX, {user_ctx, #user_ctx{roles=[<<"_admin">>, <<"_replicator">>]}}).
 -define(replace(L, K, V), lists:keystore(K, 1, L, {K, V})).
 
 -define(DEFAULT_SOCK_OPTS, "[{keepalive, true}, {nodelay, false}]").
--define(VALID_SOCK_OPTS, [buffer, delay_send, exit_on_close, ipv6_v6only,
-    keepalive, nodelay, recbuf, send_timeout, send_timout_close, sndbuf,
-    priority, tos, tclass
+-define(VALID_SOCK_OPTS, [
+    buffer, delay_send, exit_on_close, ipv6_v6only, keepalive, nodelay, recbuf,
+    send_timeout, send_timout_close, sndbuf, priority, tos, tclass
 ]).
 
 -define(CONFIG_DEFAULTS, [
@@ -156,7 +155,7 @@ parse_rep_doc_without_id(RepDoc) ->
 -spec parse_rep_doc({[_]}, user_name()) -> {ok, #{}}.
 parse_rep_doc({[_]} = Doc, UserName) ->
     {ok, Rep} = parse_rep_doc_without_id(Doc, UserName),
-    #{<<"options">> := Options} = Rep,
+    #{?OPTIONS := Options} = Rep,
     Cancel = maps:get(<<"cancel">>, Options, false),
     Id = maps:get(<<"id">>, Options, nil),
     case {Cancel, Id} of
@@ -185,49 +184,41 @@ parse_rep_doc_without_id(#{} = Doc, UserName) ->
     Id = maps:get(<<"id">>, Opts, nil),
     case Cancel andalso Id =/= nil of
     true ->
-        {ok, #{<<"options">> => Opts, <<"user">> => UserName}};
+        {ok, #{?OPTIONS => Opts, ?REP_USER => UserName}};
     false ->
-        #{<<"source">> := Source0, <<"target">> := Target0} = Doc,
+        #{?SOURCE := Source0, ?TARGET := Target0} = Doc,
         Source = parse_rep_db(Source0, SrcProxy, Opts),
         Target = parse_rep_db(Target0, TgtProxy, Opts),
-        {Type, View} = case couch_replicator_filters:view_type(Props, Opts) of
+        case couch_replicator_filters:view_type(Props, Opts) of
             {error, Error} ->
                 throw({bad_request, Error});
-            Result ->
-                Result
+            _ ->
+                ok
         end,
-        FilterType = couch_replicator_filters:parse(Options) of
-            {ok, nil} -> null;
-            {ok, {user, _FName, _QP}} -> <<"user">>;
-            {ok, {view, _FName, _QP}} -> <<"view">>;
-            {ok, {docids, _DocIds}} -> <<"doc_ids">>;
-            {ok, {mango, _Selector}} -> <<"mango">>;
+        couch_replicator_filters:parse(Opts) of
+            {ok, _} -> ok;
             {error, FilterError} -> throw({error, FilterError})
         end,
         Rep = #{
-            <<"id">> => null,
-            <<"base_id">> => null,
+            ?REP_ID => null,
+            ?BASE_ID => null,
             ?SOURCE => Source,
             ?TARGET => Target,
-            <<"options">> => Opts,
-            <<"user">> => UserName,
-            <<"filter_type">> => FilterType,
-            <<"type">> => Type,
-            <<"view">> => View,
+            ?OPTIONS => Opts,
+            ?REP_USER => UserName,
             ?DOC_ID => maps:get(<<"_id">>, Doc, null),
             ?DB_NAME => null,
             ?DOC_STATE => null,
-            ?START_TIME => erlang:system_time(),
-            ?VER => fabric2_util:uuid()
+            ?START_TIME => erlang:system_time()
         },
         {ok, Rep}
     end.
 
 
 parse_proxy_settings(#{} = Doc) ->
-    Proxy = maps:get(<<"proxy">>, Doc, <<>>),
-    SrcProxy = maps:get(<<"source_proxy">>, Doc, <<>>),
-    TgtProxy = maps:get(<<"target_proxy">>, Doc, <<>>),
+    Proxy = maps:get(?PROXY, Doc, <<>>),
+    SrcProxy = maps:get(?SOURCE_PROXY, Doc, <<>>),
+    TgtProxy = maps:get(?TARGET_PROXY, Doc, <<>>),
 
     case Proxy =/= <<>> of
         true when SrcProxy =/= <<>> ->
@@ -250,7 +241,7 @@ parse_proxy_settings(#{} = Doc) ->
 update_rep_id(#{} = Rep) ->
     {BaseId, ExtId} = couch_replicator_ids:replication_id(Rep),
     RepId = erlang:iolist_to_binary([BaseId, ExtId]),
-    Rep#{<<"id">> => RepId, <<"base_id">> = BaseId}.
+    Rep#{?REP_ID := RepId, ?BASE_ID := BaseId}.
 
 
 update_rep_doc(RepDbName, RepDocId, KVs) ->
