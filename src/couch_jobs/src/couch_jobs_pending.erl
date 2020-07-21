@@ -74,7 +74,7 @@ pending_count(#{jtx := true} = JTx, Type, MaxSTime, Limit) ->
         {streaming_mode, want_all}
     ],
     {StartKeySel, EndKeySel} = get_range_selectors(JTx, Type, MaxSTime),
-    FoldFun = fun({_, _}, Cnt) -> Cnt + 1 end,
+    FoldFun = fun(_Row, Cnt) -> Cnt + 1 end,
     erlfdb:fold_range(Tx, StartKey, EndKey, FoldFun, 0, Opts).
 
 
