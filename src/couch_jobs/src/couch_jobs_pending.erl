@@ -47,12 +47,9 @@ dequeue(#{jtx := true} = JTx, Type, _, true) ->
             {ok, JobId}
     end;
 
-dequeue(#{jtx := true} = JTx, Type, MaxPriority, _) ->
-    #{tx := Tx, jobs_path := Jobs} = JTx,
-    Prefix = erlfdb_tuple:pack({?PENDING, Type}, Jobs),
-    StartKeySel = erlfdb_key:first_greater_than(Prefix),
-    End = erlfdb_tuple:pack({MaxPriority, <<16#FF>>}, Prefix),
-    EndKeySel = erlfdb_key:first_greater_or_equal(End),
+dequeue(#{jtx := true} = JTx, Type, MaxSTime, _) ->
+    #{tx := Tx} = JTx,
+    {StartKeySel, EndKeySel} = get_range_selectors(JTx, Type, MaxSTime),
     case clear_random_key_from_range(Tx, StartKeySel, EndKeySel) of
         {error, not_found} ->
             {not_found, get_pending_watch(JTx, Type)};
@@ -68,7 +65,38 @@ remove(#{jtx := true} = JTx, Type, JobId, STime) ->
     erlfdb:clear(Tx, Key).
 
 
+
+get_pending_count(#{jtx := true} = JTx, Type) ->
+    get_pending_count(JTx, Type, ?UNDEFINED_MAX_SCHEDULED_TIME).
+
+
+get_pending_count(#{jtx := true} = JTx, Type, MaxSTime) ->
+    get_pending_count(JTx, Type, MaxSTime, ?RANGE_LIMIT).
+
+
+get_pending_count(#{jtx := true} = JTx, Type, MaxSTime, Limit) ->
+    #{tx := Tx} = JTx,
+    Opts = [
+        {limit, Limit},
+        {snapshot, true},
+        {streaming_mode, want_all}
+    ],
+    {StartKeySel, EndKeySel} = get_range_selectors(JTx, Type, MaxSTime),
+    FoldFun = fun({_, _}, Cnt) -> Cnt + 1 end,
+    erlfdb:fold_range(Tx, StartKey, EndKey, FoldFun, 0, Opts).
+
+
 %% Private functions
+
+% Get key selectors for a pending items, taking into account max scheduled
+% time.
+get_range_selectors(#{jtx := true} = JTx, Type, MaxSTime) ->
+    #{jobs_path := Jobs} = JTx,
+    Prefix = erlfdb_tuple:pack({?PENDING, Type}, Jobs),
+    StartKeySel = erlfdb_key:first_greater_than(Prefix),
+    End = erlfdb_tuple:pack({MaxSTime, <<16#FF>>}, Prefix),
+    EndKeySel = erlfdb_key:first_greater_or_equal(End),
+    {StartKeySel, EndKeySel}.
 
 
 % Pick a random item from the range without reading the keys in first. However
