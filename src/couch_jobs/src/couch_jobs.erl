@@ -19,7 +19,10 @@
     remove/3,
     get_job_data/3,
     get_job_state/3,
-    fold_jobs/4
+    fold_jobs/4,
+    pending_count/2,
+    pending_count/3,
+    pending_count/4
 
     % Job processing
     accept/1,
@@ -112,6 +115,20 @@ fold_jobs(Tx, Type, Fun, UserAcc) when is_function(Fun, 4) ->
             Data = couch_jobs_fdb:decode(DataEnc),
             Fun({JTx, JobId, JobState, Data}, Acc)
         end, UserAcc, couch_jobs_fdb:get_jobs(JTx, Type))
+    end).
+
+
+-spec pending_count(jtx(), job_type()) -> integer().
+pending_count(Tx, Type) ->
+    pending_count(Tx, Type, #{}).
+
+
+-spec pending_count(jtx(), job_type(), #{}) -> integer().
+pending_count(Tx, Type, Opts) ->
+    MaxSTime = maps:get(max_sched_time, Opts, ?UNDEFINED_MAX_SCHEDULED_TIME),
+    Limit = maps:get(limit, Opts, 1024),
+    couch_jobs_fdb:tx(couch_jobs_fdb:get_jtx(Tx), fun(JTX) ->
+        couch_jobs_pending:pending_count(JTx, Type, MaxSTime, Limit)
     end).
 
 

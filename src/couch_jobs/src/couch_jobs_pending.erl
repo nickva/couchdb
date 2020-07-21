@@ -16,7 +16,8 @@
 -export([
     enqueue/4,
     dequeue/4,
-    remove/4
+    remove/4,
+    pending_count/4
 ]).
 
 
@@ -65,16 +66,7 @@ remove(#{jtx := true} = JTx, Type, JobId, STime) ->
     erlfdb:clear(Tx, Key).
 
 
-
-get_pending_count(#{jtx := true} = JTx, Type) ->
-    get_pending_count(JTx, Type, ?UNDEFINED_MAX_SCHEDULED_TIME).
-
-
-get_pending_count(#{jtx := true} = JTx, Type, MaxSTime) ->
-    get_pending_count(JTx, Type, MaxSTime, ?RANGE_LIMIT).
-
-
-get_pending_count(#{jtx := true} = JTx, Type, MaxSTime, Limit) ->
+pending_count(#{jtx := true} = JTx, Type, MaxSTime, Limit) ->
     #{tx := Tx} = JTx,
     Opts = [
         {limit, Limit},
@@ -88,8 +80,7 @@ get_pending_count(#{jtx := true} = JTx, Type, MaxSTime, Limit) ->
 
 %% Private functions
 
-% Get key selectors for a pending items, taking into account max scheduled
-% time.
+% Get pending key selectors, taking into account max scheduled time value.
 get_range_selectors(#{jtx := true} = JTx, Type, MaxSTime) ->
     #{jobs_path := Jobs} = JTx,
     Prefix = erlfdb_tuple:pack({?PENDING, Type}, Jobs),
