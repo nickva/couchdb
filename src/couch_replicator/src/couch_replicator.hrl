@@ -33,6 +33,12 @@
 -define(SOURCE_PROXY, <<"source_proxy">>).
 -define(TARGET_PROXY, <<"target_proxy">>).
 
+-define(REPLICATION_STATE, <<"_replication_state">>).
+-define(REPLICATION_STATS, <<"_replication_stats">>).
+-define(REPLICATION_ID, <<"_replication_id">>).
+-define(REPLICATION_STATE_TIME, <<"_replication_state_time">>).
+-define(REPLICATION_STATE_REASON, <<"_replication_state_reason">>).
+
 % Replication states
 -define(ST_ERROR, <<"error">>).
 -define(ST_FINISHED, <<"completed">>).

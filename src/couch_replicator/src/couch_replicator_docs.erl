@@ -75,19 +75,19 @@
 
 remove_state_fields(DbName, DocId) ->
     update_rep_doc(DbName, DocId, [
-        {<<"_replication_state">>, undefined},
-        {<<"_replication_state_time">>, undefined},
-        {<<"_replication_state_reason">>, undefined},
-        {<<"_replication_id">>, undefined},
-        {<<"_replication_stats">>, undefined}]).
+        {?REPLICATION_STATE, undefined},
+        {?REPLICATION_STATE_TIME, undefined},
+        {?REPLICATION_STATE_REASON, undefined},
+        {?REPLICATION_ID, undefined},
+        {?REPLICATION_STATS, undefined}]).
 
 
 -spec update_doc_completed(binary(), binary(), [_]) -> any().
 update_doc_completed(DbName, DocId, Stats) ->
     update_rep_doc(DbName, DocId, [
-        {<<"_replication_state">>, <<"completed">>},
-        {<<"_replication_state_reason">>, undefined},
-        {<<"_replication_stats">>, {Stats}}]),
+        {?REPLICATION_STATE, <<"completed">>},
+        {?REPLICATION_STATE_REASON, undefined},
+        {?REPLICATION_STATS, {Stats}}]),
     couch_stats:increment_counter([couch_replicator, docs,
         completed_state_updates]).
 
@@ -98,9 +98,9 @@ update_failed(DbName, DocId, Error) ->
     couch_log:error("Error processing replication doc `~s` from `~s`: ~s",
         [DocId, DbName, Reason]),
     update_rep_doc(DbName, DocId, [
-        {<<"_replication_state">>, <<"failed">>},
-        {<<"_replication_stats">>, undefined},
-        {<<"_replication_state_reason">>, Reason}]),
+        {?REPLICATION_STATE, <<"failed">>},
+        {?REPLICATION_STATS, undefined},
+        {?REPLICATION_STATE_REASON, Reason}]),
     couch_stats:increment_counter([couch_replicator, docs,
         failed_state_updates]).
 
@@ -108,10 +108,10 @@ update_failed(DbName, DocId, Error) ->
 -spec update_triggered(binary(), binary(), binary()) -> ok.
 update_triggered(Id, DocId, DbName) ->
     update_rep_doc(DbName, DocId, [
-        {<<"_replication_state">>, <<"triggered">>},
-        {<<"_replication_state_reason">>, undefined},
-        {<<"_replication_id">>, Id},
-        {<<"_replication_stats">>, undefined}]),
+        {?REPLICATION_STATE, <<"triggered">>},
+        {?REPLICATION_STATE_REASON, undefined},
+        {?REPLICATION_ID, Id},
+        {?REPLICATION_STATS, undefined}]),
     ok.
 
 
@@ -123,10 +123,10 @@ update_error(RepId0, DbName, DocId, Error) ->
         _Other -> null
     end,
     update_rep_doc(DbName, DocId, [
-        {<<"_replication_state">>, <<"error">>},
-        {<<"_replication_state_reason">>, Reason},
-        {<<"_replication_stats">>, undefined},
-        {<<"_replication_id">>, BinRepId}]),
+        {?REPLICATION_STATE, <<"error">>},
+        {?REPLICATION_STATE_REASON, Reason},
+        {?REPLICATION_STATS, undefined},
+        {?REPLICATION_ID, BinRepId}]),
     ok.
 
 
@@ -269,7 +269,7 @@ update_rep_doc(RepDbName, #doc{body = {RepDocBody}} = RepDoc, KVs, _Try) ->
     NewRepDocBody = lists:foldl(
         fun({K, undefined}, Body) ->
                 lists:keydelete(K, 1, Body);
-           ({<<"_replication_state">> = K, State} = KV, Body) ->
+           ({?REPLICATION_STATE = K, State} = KV, Body) ->
                 case get_json_value(K, Body) of
                 State ->
                     Body;
@@ -277,8 +277,8 @@ update_rep_doc(RepDbName, #doc{body = {RepDocBody}} = RepDoc, KVs, _Try) ->
                     Body1 = lists:keystore(K, 1, Body, KV),
                     Timestamp = couch_replicator_utils:iso8601(os:timestamp()),
                     lists:keystore(
-                        <<"_replication_state_time">>, 1, Body1,
-                        {<<"_replication_state_time">>, Timestamp})
+                        ?REPLICATION_STATE_TIME, 1, Body1,
+                        {?REPLICATION_STATE_TIME, Timestamp})
                 end;
             ({K, _V} = KV, Body) ->
                 lists:keystore(K, 1, Body, KV)
