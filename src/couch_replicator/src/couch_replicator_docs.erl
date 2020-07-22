@@ -208,6 +208,7 @@ parse_rep_doc_without_id(#{} = Doc, UserName) ->
             ?REP_USER => UserName,
             ?DOC_ID => maps:get(<<"_id">>, Doc, null),
             ?DB_NAME => null,
+            ?DB_UUID => null,
             ?DOC_STATE => null,
             ?START_TIME => erlang:system_time()
         },
