@@ -53,7 +53,7 @@
     {error, any()} |
     no_return().
 replicate(PostBody, #user_ctx{name = UserName}) ->
-    {ok, Rep0} = couch_replicator_utils:parse_rep_doc(PostBody, UserName),
+    {ok, Rep0} = couch_replicator_docs:parse_rep_doc(PostBody, UserName),
     Rep = Rep0#{?START_TIME => erlang:system_time()},
     #{?REP_ID := RepId, ?OPTIONS := Options} = Rep,
     case maps:get(<<"cancel">>, Options, false) of
@@ -68,12 +68,43 @@ replicate(PostBody, #user_ctx{name = UserName}) ->
             end;
         false ->
             check_authorization(RepId, UserCtx),
-            ok = couch_replicator_scheduler:add_job(Rep),
+            ok = start_replicate_job(Rep),
             case maps:get(<<"continuous">>, Options, false) of
                 true -> {ok, {continuous, Id}};
                 false -> wait_for_result(Id)
             end
     end.
+
+
+-spec start_replicate_job(#{}) -> ok.
+start_replicate_job(#{} = Rep) ->
+    RepJobData = #{
+        ?REP => Rep,
+        ?STATE => ?ST_PENDING,
+        ?STATE_INFO => null,
+        ?ERROR_COUNT => 0,
+        ?LAST_UPDATED => erlang:system_time(),
+        ?HISTORY => []
+    },
+    couch_jobs_fdb:tx(couch_jobs_fdb:get_jtx(Tx), fun(JTx) ->
+        case couch_jobs:get_job_data(JTx, ?REP_JOBS, RepID) of
+            {ok, #{?REP := OldRep}} ->
+                case couch_replicator_utils:compare_rep_objects(Rep, OldRep) of
+                    true ->
+                        % If a job with the same paremeters is running we don't
+                        % stop and just ignore the request. This is mainly for
+                        % compatibility where users are able to idempotently
+                        % POST the same job without it being stopped and
+                        % restarted.
+                        ok;
+                    false ->
+                        ok = couch_jobs:remove(JTx, ?REP_JOBS, RepID)
+                        ok = couch_jobs:add(JTx, ?REP_JOBS, RepId, JobData)
+                end;
+            {error, not_found} ->
+                ok = couch_jobs:add(JTx, ?REP_JOBS, RepID, JobData)
+        end
+    end).
 
 
 % This is called from supervisor. Must respect supervisor protocol so
@@ -122,7 +153,7 @@ cancel_replication(RepId) when is_binary(RepId) ->
     case couch_jobs:get_job_data(undefined, ?REP_JOBS, RepId) of
         {error_not, found} ->
             {error, not_found};
-        #{?REP := #{?DB_NAME := null}} ->
+        #{?REP := #{?DB_NAME := null, ?DB_UUID := null}} ->
             couch_jobs:remove(undefined, ?REP_JOBS, RepId)
             {ok, {cancelled, ?l2b(FullRepId)}};
         #{?REP := #{}} ->
