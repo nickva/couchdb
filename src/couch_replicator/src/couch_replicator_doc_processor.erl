@@ -703,10 +703,48 @@ remove_replication_by_doc_job_id(JTx, DocJobId, Data) ->
     end.
 
 -spec remove_replications_by_dbname(DbName, DbUUID) -> ok.
-remove_replications_by_dbname(DbName) ->
-    couch_jobs:fold_jobs(undefined, ?REP_DOCS, fun({JTx, DocJobId, _, Data}, ok) ->
-        ok = remove_replication_by_doc_job_id(JTx, DocJobId, Data)
-    end, ok).
+remove_replications_by_dbname(DbName, DbUUID) ->
+    FoldFun = fun({JTx, DocJobId, _, Data}, ok) ->
+        case Data of
+            #{?DB_UUID := DbName, ?DB_UUID := DbUUID} ->
+                ok = remove_replication_by_doc_job_id(JTx, DocJobId, Data);
+            #{} ->
+                ok
+        end
+    end,
+    couch_jobs:fold_jobs(undefined, ?REP_DOCS, FoldFun, ok).
+
+
+-spec add_replications_by_dbname(DbName, DbUUID) -> ok.
+add_replications_by_dbname(DbName, DbUUID) ->
+    try fabric2_db:open(DbName, [{uuid, DbUUID}]) of
+        {ok, Db} ->
+            fabric2_fdb:transactional(Db, fun(TxDb) ->
+                ok = add_replications_from_db(TxDb)
+            end)
+    catch
+        error:database_does_not_exist ->
+            ok
+    end.
+
+
+-spec add_replications_from_db(TxDB) -> ok.
+add_replications_from_db(#{} = TxDb) ->
+    FoldFun  = fun
+        ({meta, _Meta}, ok) -> {ok, ok};
+        (complete, ok) -> {ok, ok};
+        ({row, Row}, ok) -> ok = process_change(TxDb, get_doc(TxDb, Row))
+    end,
+    Opts = [{restart_tx, true}],
+    {ok, ok} = fabric2_db:fold_docs(Db, FoldFun, ok, Opts),
+    ok.
+
+
+-spec get_doc(#{}, list()) -> #doc{}.
+get_doc(Db, Row) ->
+    {_, DocId} = lists:keyfind(id, 1, Row),
+    {ok, #doc{deleted = false} = Doc} = fabric2_db:open_doc(TxDb, DocId, []),
+    Doc.
 
 
 -ifdef(TEST).
