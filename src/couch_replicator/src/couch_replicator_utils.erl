@@ -13,7 +13,6 @@
 -module(couch_replicator_utils).
 
 -export([
-   parse_rep_doc/2,
    replication_id/2,
    sum_stats/2,
    is_deleted/1,
@@ -24,6 +23,7 @@
    filter_state/3,
    remove_basic_auth_from_headers/1,
    normalize_rep/1,
+   compare_rep_objects/2,
    default_headers_map/0
 ]).
 
@@ -90,9 +90,6 @@ sum_stats(S1, S2) ->
     couch_replicator_stats:sum_stats(S1, S2).
 
 
-parse_rep_doc(Props, UserCtx) ->
-    couch_replicator_docs:parse_rep_doc(Props, UserCtx).
-
 
 -spec iso8601(integer()) -> binary().
 iso8601(Native) when is_integer(Native) ->
@@ -154,6 +151,13 @@ decode_basic_creds(Base64) ->
     end.
 
 
+-spect compare_rep_objects(#{} | null, #{} | null) -> boolean().
+compare_rep_objects(Rep1, Rep2) ->
+    NormRep1 = couch_replicator_util:normalize_rep(Rep1),
+    NormRep2 = couch_replicator_util:normalize_rep(Rep2),
+    NormRep1 =:= NormRep2.
+
+
 % Normalize a rep map such that it doesn't contain time dependent fields
 % pids (like httpc pools), and options / props are sorted. This function would
 % used during comparisons.
@@ -162,12 +166,12 @@ normalize_rep(null) ->
     null;
 
 normalize_rep(#{} = Rep)->
-    Ks = [<<"options">>, <<"type">>, <<"view">>, <<"doc_id">>, <<"db_name">>],
+    Ks = [?OPTIONS, ?DOC_ID, ?DB_NAME, ?DB_UUID],
     Rep1 = maps:with(Ks, Rep),
-    #{<<"source">> := Source, <<"target">> := Target} = Rep,
+    #{?SOURCE := Source, ?TARGET := Target} = Rep,
     Rep1#{
-        <<"source">> => normalize_endpoint(Source),
-        <<"target">> => normalize_endpoint(Target)
+        ?SOURCE => normalize_endpoint(Source),
+        ?TARGET => normalize_endpoint(Target)
     }.
 
 
@@ -175,8 +179,15 @@ normalize_endpoint(<<DbName/binary>>) ->
     DbName;
 
 normalize_endpoint(#{} = Endpoint) ->
-    Ks = [<<"url">>, <<"auth_props">>, <<"headers">>, <<"timeout">>,
-        <<"ibrowse_options">>, <<"retries">>, <<"http_connections">>
+    Ks = [
+        <<"url">>,
+        <<"auth_props">>,
+        <<"headers">>,
+        <<"timeout">>,
+        <<"ibrowse_options">>,
+        <<"retries">>,
+        <<"http_connections">>,
+        <<"proxy_url">>
     ],
     maps:with(Ks, Endpoint).
 
