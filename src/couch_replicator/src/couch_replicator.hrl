@@ -41,7 +41,7 @@
 
 % Replication states
 -define(ST_ERROR, <<"error">>).
--define(ST_FINISHED, <<"completed">>).
+-define(ST_COMPLETED, <<"completed">>).
 -define(ST_RUNNING, <<"running">>).
 -define(ST_INITIALIZING, <<"initializing">>).
 -define(ST_FAILED, <<"failed">>).

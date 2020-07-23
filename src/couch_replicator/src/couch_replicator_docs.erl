@@ -85,7 +85,7 @@ remove_state_fields(DbName, DocId) ->
 -spec update_doc_completed(binary(), binary(), [_]) -> any().
 update_doc_completed(DbName, DocId, Stats) ->
     update_rep_doc(DbName, DocId, [
-        {?REPLICATION_STATE, <<"completed">>},
+        {?REPLICATION_STATE, ?ST_COMPLETED},
         {?REPLICATION_STATE_REASON, undefined},
         {?REPLICATION_STATS, {Stats}}]),
     couch_stats:increment_counter([couch_replicator, docs,
@@ -98,7 +98,7 @@ update_failed(DbName, DocId, Error) ->
     couch_log:error("Error processing replication doc `~s` from `~s`: ~s",
         [DocId, DbName, Reason]),
     update_rep_doc(DbName, DocId, [
-        {?REPLICATION_STATE, <<"failed">>},
+        {?REPLICATION_STATE, ?ST_FAILED},
         {?REPLICATION_STATS, undefined},
         {?REPLICATION_STATE_REASON, Reason}]),
     couch_stats:increment_counter([couch_replicator, docs,
@@ -108,7 +108,7 @@ update_failed(DbName, DocId, Error) ->
 -spec update_triggered(binary(), binary(), binary()) -> ok.
 update_triggered(Id, DocId, DbName) ->
     update_rep_doc(DbName, DocId, [
-        {?REPLICATION_STATE, <<"triggered">>},
+        {?REPLICATION_STATE, ?ST_TRIGGERED},
         {?REPLICATION_STATE_REASON, undefined},
         {?REPLICATION_ID, Id},
         {?REPLICATION_STATS, undefined}]),
@@ -123,7 +123,7 @@ update_error(RepId0, DbName, DocId, Error) ->
         _Other -> null
     end,
     update_rep_doc(DbName, DocId, [
-        {?REPLICATION_STATE, <<"error">>},
+        {?REPLICATION_STATE, ?ST_ERROR},
         {?REPLICATION_STATE_REASON, Reason},
         {?REPLICATION_STATS, undefined},
         {?REPLICATION_ID, BinRepId}]),
