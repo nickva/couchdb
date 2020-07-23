@@ -112,7 +112,6 @@ start_replicate_job(#{} = Rep) ->
 -spec ensure_rep_db_exists() -> ignore.
 ensure_rep_db_exists() ->
     couch_jobs:set_type_timeout(?REP_DOCS, ?REP_DOCS_TIMEOUT_MSEC),
-    couch_jobs:set_type_timeout(?REP_JOBS, ?REP_JOBS_TIMEOUT_MSEC),
     case config:get_boolean("replicator", "create_replicator_db", false) of
         true ->
             ok = couch_replicator_docs:ensure_rep_db_exists();

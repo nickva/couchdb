@@ -19,6 +19,10 @@
 ]).
 
 -export([
+   accept/0
+]).
+
+-export([
    init/1,
    terminate/2,
    handle_call/3,
@@ -43,6 +47,7 @@
 -define(LOWEST_SEQ, 0).
 -define(DEFAULT_CHECKPOINT_INTERVAL, 30000).
 -define(STARTUP_JITTER_DEFAULT, 5000).
+-define(ACCEPT_JITTER_DEFAULT, 5000).
 
 -record(rep_state, {
     job,
@@ -80,27 +85,30 @@
 }).
 
 
-start_link(#{} = Job, #{} = JobData) ->
-    case gen_server:start_link(?MODULE, {Job, JobData}, []) of
-        {ok, Pid} ->
-            {ok, Pid};
-        {error, Reason} ->
-            #{?REP := Rep} = JobData,
-            {?REP_ID := Id, ?SOURCE := Src, ?TARGET := Ttg} = Rep,
-            Source = couch_replicator_api_wrap:db_uri(Src),
-            Target = couch_replicator_api_wrap:db_uri(Tgt),
-            ErrMsg = "failed to start replication `~s` (`~s` -> `~s`)",
-            couch_log:warning(ErrMsg, [RepId, Source, Target]),
-            {error, Reason}
+start_link() ->
+    gen_server:start_link(?MODULE, [], []).
+
+
+init(_) ->
+    process_flag(trap_exit, true),
+    {ok, accepting, 0}.
+
+
+accept() ->
+    NowSec = erlang:system_time(second),
+    Opts = #{max_sched_time = NowSec + accept_jitter() div 1000},
+    case couch_jobs:accept(?REP_JOBS, Opts) of
+        {ok, Job, JobData} ->
+            couch_replicator_job_server:accepted(self()),
+            {ok, Job, JobData};
+        {error, not_found} ->
+            timer:sleep(accept_jitter()),
+            ?MODULE:accept()
     end.
 
 
-init({#{} = Job, #{} = JobData}) ->
-    {ok, {Job, JobData}, 0}.
-
-
 do_init(#{} = Job, #{} = JobData) ->
-    process_flag(trap_exit, true),
+    {ok, Job, JobData} = accept(),
 
     timer:sleep(startup_jitter()),
 
@@ -305,13 +313,13 @@ handle_info({'EXIT', Pid, Reason}, #rep_state{workers = Workers} = State) ->
         {stop, StopReason, State2}
     end;
 
-handle_info(timeout, {#{} = Job, #{} = JobData} = InitArgs) ->
-    try do_init(Job, JobData) of
+handle_info(timeout, accepting) ->
+    try do_init() of
         {ok, State} ->
             {noreply, State}
     catch
         exit:{http_request_failed, _, _, max_backoff} ->
-            {stop, {shutdown, max_backoff}, {error, InitArgs}};
+            {stop, {shutdown, max_backoff}, {error, max_backoff}};
         Class:Error ->
             ShutdownReason = {error, replication_start_error(Error)},
             StackTop2 = lists:sublist(erlang:get_stacktrace(), 2),
@@ -438,6 +446,12 @@ startup_jitter() ->
     couch_rand:uniform(erlang:max(1, Jitter)).
 
 
+accept_jitter() ->
+    Jitter = config:get_integer("replicator", "accept_jitter",
+        ?ACCEPT_JITTER_DEFAULT),
+    couch_rand:uniform(erlang:max(1, Jitter)).
+
+
 headers_strip_creds([], Acc) ->
     lists:reverse(Acc);
 headers_strip_creds([{Key, Value0} | Rest], Acc) ->
@@ -510,7 +524,7 @@ doc_update_completed(#rep_state{} = State) ->
 do_last_checkpoint(#rep_state{seqs_in_progress = [],
     highest_seq_done = {_Ts, ?LOWEST_SEQ}} = State) ->
     History = State#rep_state.checkoint_history,
-    Result = case finish_couch_job(State, <<"completed">>, History) of
+    Result = case finish_couch_job(State, ?ST_COMPLETED, History) of
         ok -> normal;
         {error, _} = Error -> Error
     end,
@@ -521,7 +535,7 @@ do_last_checkpoint(#rep_state{seqs_in_progress = [],
     {ok, NewState} ->
         couch_stats:increment_counter([couch_replicator, checkpoints, success]),
         History = NewState#rep_state.checkpoint_history,
-        Result = case finish_couch_job(NewState, <<"completed">>, History) of
+        Result = case finish_couch_job(NewState, ?ST_COMPLETED, History) of
             ok -> normal;
             {error, _} = Error -> Error
         end,
