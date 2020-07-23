@@ -680,7 +680,7 @@ add_rep_doc_job(Tx, DbName, DbUUID, DocId, Rep, RepParseError) ->
     end,
     couch_jobs_fdb:tx(couch_jobs_fdb:get_jtx(Tx), fun(JTx) ->
        case couch_jobs:get_job_data(JTx, ?REP_DOCS, DocJobId) of
-           {ok, #{} = Data} ->
+            {ok, #{} = Data} ->
                ok = remove_replication_by_doc_job_id(JTx, DocJobId, Data);
             {error, not_found} ->
                ok
