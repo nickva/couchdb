@@ -73,6 +73,8 @@
 -define(LAST_UPDATED, <<"last_updated">>).
 -define(HISTORY, <<"history">>).
 
+-define(REP_DB_NAME, <<"_replicator">>).
+
 % Accepted job message tag
 -define(ACCEPTED_JOB, accepted_job).
 

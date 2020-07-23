@@ -58,6 +58,8 @@
 
 -type repstate() :: initializing | error | scheduled.
 
+-define(IS_REPLICATOR_DB(DbName), (DbName =:= ?REP_DB_NAME orelse
+    binary_part(DbName, byte_size(DbName), -12) =:= <<"/_replicator">>).
 
 -define(MAX_ACCEPTORS, 10).
 -define(MAX_JOBS, 500).
@@ -65,19 +67,30 @@
 
 % EPI db monitoring plugin callbacks
 
-after_db_create(DbName, DbUUID) ->
+after_db_create(DbName, DbUUID) when ?IS_REPLICATOR_DB(DbName)->
     couch_stats:increment_counter([couch_replicator, docs, dbs_created]),
-    add_replications_by_dbname(DbName, DbUUID).
+    add_replications_by_dbname(DbName, DbUUID);
+
+after_db_create(_DbName, _DbUUID) ->
+    ok.
 
 
-after_db_delete(DbName, DbUUID) ->
+after_db_delete(DbName, DbUUID) when ?IS_REPLICATOR_DB(DbName) ->
     couch_stats:increment_counter([couch_replicator, docs, dbs_deleted]),
-    remove_replications_by_dbname(DbName, DbUUID)).
+    remove_replications_by_dbname(DbName, DbUUID);
+
+after_db_delete(_DbName, _DbUUID) ->
+    ok.
 
 
-after_doc_write(Db, #doc{} = Doc, _NewWinner, _OldWinner, _NewRevId, _Seq) ->
+after_doc_write(#{name := DbName} = Db, #doc{} = Doc, _NewWinner, _OldWinner,
+        _NewRevId, _Seq) when ?IS_REPLICATOR_DB(DbName) ->
     couch_stats:increment_counter([couch_replicator, docs, db_changes]),
-    ok = process_change(Db, Doc).
+    ok = process_change(Db, Doc);
+
+after_doc_write(_Db, _Doc, _NewWinner, _OldWinner, _NewRevId, _Seq) ->
+    ok.
+
 
 
 % Process replication doc updates
