@@ -26,8 +26,8 @@ validate(#{<<"_replication_state">> := ?ST_FAILED}) ->
     ok;
 
 validate(#{?SOURCE := _, ?TARGET := _} = Doc) ->
-    maps:fold(fun validate_field/2, Doc).
-    validate_mutually_exclusive_filters(Doc);
+    maps:fold(fun validate_field/2, Doc),
+    validate_mutually_exclusive_filters(Doc).
 
 validate(_) ->
     fail("Both `source` and `target` fields must exist").

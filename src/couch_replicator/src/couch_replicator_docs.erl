@@ -617,7 +617,14 @@ before_doc_update(#doc{body = {Body}} = Doc, Db, _UpdateType) ->
             % Encode as a map and normalize all field names as binaries
             BodyStr = couch_util:json_encode(Doc1#doc.body),
             BodyMap = couch_util:json_decode(BodyStr, [return_maps]),
-            couch_replicator_validate_doc:validate(BodyMap)
+            couch_replicator_validate_doc:validate(BodyMap),
+            % Try to fully parsing the doc into an internal replication record
+            try
+                parse_rep_doc_without_id(Doc1#doc.body)
+            catch
+                throw:{bad_rep_doc, Error} ->
+                    throw({forbidden, Error})
+            end
     end,
     Doc1.
 
