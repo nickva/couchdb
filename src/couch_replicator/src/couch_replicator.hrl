@@ -48,7 +48,7 @@
 -define(ST_PENDING, <<"pending">>).
 -define(ST_ERROR, <<"error">>).
 -define(ST_CRASHING, <<"crashing">>).
--define(ST_TRIGGERED, <<"triggered">>).
+-define(ST_TRIGGERED, <<"triggered">>).  % Legacy state, used in docs only
 
 % Some fields from a rep object
 -define(REP_ID, <<"rep_id">>).
@@ -77,7 +77,6 @@
 
 % Accepted job message tag
 -define(ACCEPTED_JOB, accepted_job).
-
 
 
 -type rep_id() :: binary().
