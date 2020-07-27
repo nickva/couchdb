@@ -54,6 +54,9 @@
     job_data,
     id,
     base_id,
+    doc_id,
+    db_name,
+    db_uuid,
     source_name,
     target_name,
     source,
@@ -96,8 +99,8 @@ init(_) ->
 
 accept() ->
     NowSec = erlang:system_time(second),
-    Opts = #{max_sched_time = NowSec + accept_jitter() div 1000},
-    case couch_jobs:accept(?REP_JOBS, Opts) of
+    MaxSchedTime = NowSec + accept_jitter() div 1000},
+    case couch_replicator_jobs:accept(MaxSchedTime) of
         {ok, Job, JobData} ->
             couch_replicator_job_server:accepted(self()),
             {ok, Job, JobData};
@@ -353,21 +356,19 @@ terminate(shutdown, #rep_state{id = RepId} = State) ->
 terminate({shutdown, max_backoff}, {error, {#{} = Job, #{} = JobData}}) ->
     % Here we handle the case when replication fails during initialization.
     % That is before the #rep_state{} is even built.
-    #{?REP := #{?REP_ID := RepId}} = JobData,
+    #{?REP_ID := RepId} = JobData,
     couch_stats:increment_counter([couch_replicator, failed_starts]),
     couch_log:warning("Replication `~s` reached max backoff ", [RepId]),
     finish_couch_job(Job, JobData, <<"error">>, max_backoff);
 
 terminate({shutdown, {error, Error}}, {error, Class, Stack, {Job, JobData}}) ->
     % Here we handle the case when replication fails during initialization.
-    #{?REP := Rep} = JobData,
     #{
-       ?REP_ID := Id,
-       ?SOURCE := Source0,
-       ?TARGET := Target0,
-       ?DOC_ID := DocId,
-       ?DB_NAME := DbName
-    } = Rep,
+        ?REP_ID := Id,
+        ?DB_NAME := DbName,
+        ?DOC_ID := DocId} = JobData,
+        ?REP := #{?SOURCE := Source0, ?TARGET := Target0}
+    } = JobData,
     Source = couch_replicator_api_wrap:db_uri(Source0),
     Target = couch_replicator_api_wrap:db_uri(Target0),
     Msg = "~p:~p: Replication ~s failed to start ~p -> ~p doc ~p:~p stack:~p",
@@ -552,7 +553,7 @@ finish_couch_job(#rep_state{} = State, FinishedState, Result) ->
 
 
 finish_couch_job(#{} = Job, #{} = JobData, FinishState, Result0) ->
-    #{?REP := #{?REP_ID := RepId}} = JobData,
+    #{?REP_ID := RepId} = JobData,
     Result = case Result0 of
         null -> null;
         #{} -> Result0;
@@ -594,16 +595,19 @@ cancel_timer(#rep_state{timer = Timer} = State) ->
 
 
 init_state(#{} = Job, #{} = JobData) ->
-    #{?REP := Rep} = JobData,
     #{
+        ?REP := Rep,
         ?REP_ID := Id,
         ?BASE_ID := BaseId,
+        ?DB_NAME := DbName,
+        ?DB_UUID := DbUUID,
+        ?DOC_ID := DocId
+    } = JobData,
+    #{
         ?SOURCE := Src0,
         ?TARGET := Tgt,
         ?START_TIME := StartTime,
         ?OPTIONS := OptionsMap,
-        ?DB_NAME := DbName,
-        ?DOC_ID := DocId,
     } = Rep,
 
     Options = maps:fold(fun(K, V, Acc) ->
@@ -663,7 +667,8 @@ init_state(#{} = Job, #{} = JobData) ->
         checkpoint_interval = get_value(checkpoint_interval, Options),
         stats = Stats2,
         doc_id = DocId,
-        db_name = DbName
+        db_name = DbName,
+        db_uuid = DbUUID
     },
     State#rep_state{timer = start_timer(State)}.
 

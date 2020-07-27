@@ -166,12 +166,15 @@ normalize_rep(null) ->
     null;
 
 normalize_rep(#{} = Rep)->
-    Ks = [?OPTIONS, ?DOC_ID, ?DB_NAME, ?DB_UUID],
-    Rep1 = maps:with(Ks, Rep),
-    #{?SOURCE := Source, ?TARGET := Target} = Rep,
-    Rep1#{
+    #{
+        ?SOURCE := Source,
+        ?TARGET := Target,
+        ?OPTIONS := Options
+    } = Rep,
+    #{
         ?SOURCE => normalize_endpoint(Source),
-        ?TARGET => normalize_endpoint(Target)
+        ?TARGET => normalize_endpoint(Target),
+        ?OPTINS => Options
     }.
 
 

@@ -13,11 +13,10 @@
 -module(couch_replicator_docs).
 
 -export([
+    parse_transient_rep/2,
+    parse_rep_db/3,
     parse_rep_doc/1,
     parse_rep_doc/2,
-    parse_rep_db/3,
-    parse_rep_doc_without_id/1,
-    parse_rep_doc_without_id/2,
     before_doc_update/3,
     after_doc_read/2,
     ensure_rep_db_exists/0,
@@ -25,7 +24,6 @@
     remove_state_fields/2,
     update_doc_completed/3,
     update_failed/3,
-    update_rep_id/1,
     update_triggered/3,
     update_error/4
 ]).
@@ -138,10 +136,10 @@ ensure_rep_db_exists() ->
     end.
 
 
--spec parse_rep_doc_without_id({[_]}) -> #{}.
-parse_rep_doc_without_id(RepDoc) ->
+-spec parse_rep_doc({[_]}) -> #{}.
+parse_rep_doc(RepDoc) ->
     {ok, Rep} = try
-        parse_rep_doc_without_id(RepDoc, null)
+        parse_rep_doc(RepDoc, null)
     catch
         throw:{error, Reason} ->
             throw({bad_rep_doc, Reason});
@@ -151,32 +149,34 @@ parse_rep_doc_without_id(RepDoc) ->
     Rep.
 
 
--spec parse_rep_doc({[_]}, user_name()) -> {ok, #{}}.
-parse_rep_doc({[_]} = Doc, UserName) ->
-    {ok, Rep} = parse_rep_doc_without_id(Doc, UserName),
+-spec parse_transient_rep({[_]}, user_name()) -> {ok, #{}}.
+parse_transient_rep({[_]} = Doc, UserName) ->
+    {ok, Rep} = parse_rep_doc(Doc, UserName),
     #{?OPTIONS := Options} = Rep,
     Cancel = maps:get(<<"cancel">>, Options, false),
     Id = maps:get(<<"id">>, Options, nil),
     case {Cancel, Id} of
         {true, nil} ->
             % Cancel request with no id, must parse id out of body contents
-            {ok, update_rep_id(Rep)};
+            JobId = couch_replicator_ids:job_id(Rep),
+            {ok, {JobId, Rep}};
         {true, Id} ->
             % Cancel request with an id specified, so do not parse id from body
-            {ok, Rep};
+            {ok, {Id, Rep}};
         {false, _Id} ->
+            JobId = couch_replicator_ids:job_id(Rep),
             % Not a cancel request, regular replication doc
-            {ok, update_rep_id(Rep)}
+            {ok, {JobId, Rep}}
     end.
 
 
--spec parse_rep_doc_without_id({[_]} | #{}, user_name()) -> {ok, #{}}.
-parse_rep_doc_without_id({[_]} = EJson, UserName) ->
+-spec parse_rep_doc({[_]} | #{}, user_name()) -> {ok, #{}}.
+parse_rep_doc({[_]} = EJson, UserName) ->
     % Normalize all field names to be binaries and turn into a map
     Map = ?JSON_DECODE(?JSON_ENCODE(EJson)),
-    parse_rep_doc_without_id(Map, UserName);
+    parse_rep_doc(Map, UserName);
 
-parse_rep_doc_without_id(#{} = Doc, UserName) ->
+parse_rep_doc(#{} = Doc, UserName) ->
     {SrcProxy, TgtProxy} = parse_proxy_settings(Doc),
     Opts = make_options(Doc),
     Cancel = maps:get(<<"cancel">>, Opts, false),
@@ -199,15 +199,10 @@ parse_rep_doc_without_id(#{} = Doc, UserName) ->
             {error, FilterError} -> throw({error, FilterError})
         end,
         Rep = #{
-            ?REP_ID => null,
-            ?BASE_ID => null,
             ?SOURCE => Source,
             ?TARGET => Target,
             ?OPTIONS => Opts,
             ?REP_USER => UserName,
-            ?DOC_ID => maps:get(<<"_id">>, Doc, null),
-            ?DB_NAME => null,
-            ?DB_UUID => null,
             ?DOC_STATE => null,
             ?START_TIME => erlang:system_time()
         },
@@ -232,16 +227,6 @@ parse_proxy_settings(#{} = Doc) ->
         false ->
             {parse_proxy_params(SrcProxy), parse_proxy_params(TgtProxy)}
     end.
-
-
-% Update a #rep{} record with a replication_id. Calculating the id might involve
-% fetching a filter from the source db, and so it could fail intermetently.
-% In case of a failure to fetch the filter this function will throw a
-%  `{filter_fetch_error, Reason} exception.
-update_rep_id(#{} = Rep) ->
-    {BaseId, ExtId} = couch_replicator_ids:replication_id(Rep),
-    RepId = erlang:iolist_to_binary([BaseId, ExtId]),
-    Rep#{?REP_ID := RepId, ?BASE_ID := BaseId}.
 
 
 update_rep_doc(RepDbName, RepDocId, KVs) ->
@@ -620,7 +605,7 @@ before_doc_update(#doc{body = {Body}} = Doc, Db, _UpdateType) ->
             couch_replicator_validate_doc:validate(BodyMap),
             % Try to fully parsing the doc into an internal replication record
             try
-                parse_rep_doc_without_id(Doc1#doc.body)
+                parse_rep_doc(Doc1#doc.body)
             catch
                 throw:{bad_rep_doc, Error} ->
                     throw({forbidden, Error})
@@ -831,7 +816,7 @@ t_error_on_local_endpoint() ->
             {<<"target">>, <<"http://somehost.local/tgt">>}
         ]},
         Expect = local_endpoints_not_supported,
-        ?assertThrow({bad_rep_doc, Expect}, parse_rep_doc_without_id(RepDoc))
+        ?assertThrow({bad_rep_doc, Expect}, parse_rep_doc(RepDoc))
     end).
 
 -endif.
