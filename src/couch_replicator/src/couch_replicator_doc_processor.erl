@@ -132,8 +132,16 @@ process_change(#{} = Db, #doc{deleted = false} = Doc) ->
         ?JOB_HISTORY => []
     },
     JobData = case Rep of
-        null -> JobData0#{?STATE => ?ST_FAILED, ?STATE_INFO => Error};
-        #{} -> JobData0#{?STATE => ?ST_INITIALIZING, ?STATE_INFO => null}
+        null ->
+            JobData0#{
+                ?STATE => ?ST_FAILED,
+                ?STATE_INFO => Error
+            };
+        #{} ->
+            JobData0#{
+                ?STATE => ?ST_INITIALIZING,
+                ?STATE_INFO => null
+            }
     end,
     couch_jobs_fdb:tx(couch_jobs_fdb:get_jtx(Db), fun(JTx) ->
         couch_replicate_jobs:get_job_data(JTx, JobId) of

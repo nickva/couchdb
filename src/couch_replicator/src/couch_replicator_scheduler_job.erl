@@ -110,8 +110,12 @@ accept() ->
     end.
 
 
-do_init(#{} = Job, #{} = JobData) ->
+do_init() ->
+    couch_log:debug("~p : starting acceptor ", [?MODULE]),
+
     {ok, Job, JobData} = accept(),
+
+    couch_log:debug("~p : accepted job ~p, initializing", [?MODULE, Job]),
 
     timer:sleep(startup_jitter()),
 
@@ -350,7 +354,7 @@ terminate(shutdown, #rep_state{id = RepId} = State) ->
             LogMsg = "~p : Failed last checkpoint. Job: ~p Error: ~p",
             couch_log:error(LogMsg, [?MODULE, RepId, Error]),
             State
-    end,    finish_couch_job(State1, <<"stopped">>, null),
+    end,    finish_couch_job(State1, ?ST_PENDING, null),
     terminate_cleanup(State1);
 
 terminate({shutdown, max_backoff}, {error, {#{} = Job, #{} = JobData}}) ->
