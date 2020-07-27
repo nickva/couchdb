@@ -47,7 +47,7 @@ accepted(Worker) when is_pid(Worker) ->
 
 init(_) ->
     process_flag(trap_exit, true),
-    couch_jobs:set_type_timeout(?REP_JOBS, ?REP_JOBS_TIMEOUT_MSEC),
+    couch_replicator_jobs:set_couch_jobs_timeout(),
     St = #{
         acceptors => #{},
         workers => #{},

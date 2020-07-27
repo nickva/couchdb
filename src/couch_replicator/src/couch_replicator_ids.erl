@@ -15,6 +15,8 @@
 -export([
     replication_id/1,
     replication_id/2,
+    job_id/1,
+    job_id/2,
     convert/1
 ]).
 
@@ -32,8 +34,10 @@
 
 replication_id(#{?OPTIONS := Options} = Rep) ->
     BaseId = replication_id(Rep, ?REP_ID_VERSION),
-    UseOpts = [<<"continuous">>, <<"create_target">>]
-    {BaseId, maybe_append_options(UseOpts, Options)}.
+    UseOpts = [<<"continuous">>, <<"create_target">>],
+    ExtId = maybe_append_options(UseOpts, Options),
+    RepId = iolist_to_binary([BaseId, ExtId]),
+    {RepId, BaseId}.
 
 
 % Versioned clauses for generating replication IDs.
@@ -76,6 +80,32 @@ replication_id(#{?SOURCE := Src0, ?TARGET := Tgt0} = Rep, 1) ->
     maybe_append_filters([HostName, Src, Tgt], Rep).
 
 
+-spec job_id(#{}) -> binary().
+job_id(#{?DB_NAME := null, ?DOC_ID := null} = Rep) ->
+    #{
+        ?SOURCE := Src,
+        ?TARGET := Tgt,
+        ?REP_USER := UserName,
+        ?OPTIONS := Options
+    } = Rep,
+    UUID = couch_server:get_uuid(),
+    SrcInfo = get_v4_endpoint(Src),
+    TgtInfo = get_v4_endpoint(Tgt),
+    UseOpts = [<<"continuous">>, <<"create_target">>],
+    Opts = maybe_append_options(UseOpts, Options),
+    IdParts = [UUID, Src, Tgt, UserName, Opts],
+    maybe_append_filters(IdParts, Rep, false);
+
+job_id(#{?DB_UUID := DbUUID, ?DOC_ID := DocId} = Rep) when
+        is_binary(DbUUID), is_binary(DocId) ->
+    job_id(DbUUID, DocId).
+
+
+-spec job_id(binary(), binary()) -> binary().
+job_id(DbUUID, DocId) when is_binary(DbUUID), is_binary(DocId) ->
+    <<DbUUID/binary, "|", DocId/binary>>.
+
+
 -spec convert([_] | binary() | {string(), string()}) -> {string(), string()}.
 convert(Id) when is_list(Id) ->
     convert(?l2b(Id));
@@ -97,6 +127,10 @@ convert({BaseId, Ext} = Id) when is_binary(BaseId), is_binary(Ext) ->
 % Private functions
 
 maybe_append_filters(Base, #{} = Rep) ->
+    maybe_append_filter(Base, Rep, true).
+
+
+maybe_append_filters(Base, #{} = Rep, FetchFilter) ->
     #{
         ?SOURCE := Source,
         ?OPTIONS := Options
@@ -107,13 +141,15 @@ maybe_append_filters(Base, #{} = Rep) ->
             [];
         {ok, {view, Filter, QueryParams}} ->
             [Filter, QueryParams];
-        {ok, {user, {Doc, Filter}, QueryParams}} ->
+        {ok, {user, {Doc, Filter}, QueryParams}} when FetchFilter =:= true ->
             case couch_replicator_filters:fetch(Doc, Filter, Source) of
                 {ok, Code} ->
                     [Code, QueryParams];
                 {error, Error} ->
                     throw({filter_fetch_error, Error})
             end;
+        {ok, {user, {Doc, Filter}, QueryParams}} when FetchFilter =:= false ->
+            [Doc, Filter, QueryParams];
         {ok, {docids, DocIds}} ->
             [DocIds];
         {ok, {mango, Selector}} ->

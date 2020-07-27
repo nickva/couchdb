@@ -39,6 +39,10 @@
 -include("couch_replicator.hrl").
 
 
+-define(REP_JOBS, <<"rep_jobs">>).
+-define(REP_JOBS_TIMEOUT_MSEC, 33000).
+
+
 % Data model
 % ----------
 %
@@ -52,6 +56,10 @@
 % looks like:
 %   (?REPLICATION_IDS, RepId) -> JobId
 %
+
+set_couch_jobs_timeout() ->
+    couch_jobs:set_type_timeout(?REP_JOBS, ?REP_JOBS_TIMEOUT_MSEC).
+
 
 add_job(Tx, JobId, JobData) ->
     couch_jobs_fdb:tx(couch_jobs_fdb:get_jtx(Tx), fun(JTx) ->
