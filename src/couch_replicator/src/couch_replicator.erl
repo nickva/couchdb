@@ -53,41 +53,41 @@
     {error, any()} |
     no_return().
 replicate(PostBody, #user_ctx{name = UserName}) ->
-    {ok, Rep0} = couch_replicator_docs:parse_rep_doc(PostBody, UserName),
-    Rep = Rep0#{?START_TIME => erlang:system_time()},
-    #{?REP_ID := RepId, ?OPTIONS := Options} = Rep,
+    {ok, JobId, Rep} = couch_replicator_docs:parse_transient_rep(PostBody, UserName),
+    #{?OPTIONS := Options} = Rep,
     case maps:get(<<"cancel">>, Options, false) of
         true ->
-            CancelRepId = case maps:get(<<"id">>, Options, nil) of
-                nil -> RepId;
-                RepId2 -> RepId2
-            end,
-            case check_authorization(CancelRepId, UserCtx) of
-                ok -> cancel_replication(CancelRepId);
+            case check_authorization(JobId, UserCtx) of
+                ok -> cancel_replication(JobId);
                 not_found -> {error, not_found}
             end;
         false ->
-            check_authorization(RepId, UserCtx),
-            ok = start_replicate_job(Rep),
+            check_authorization(JobId, UserCtx),
+            ok = start_transient_job(JobId, Rep),
             case maps:get(<<"continuous">>, Options, false) of
-                true -> {ok, {continuous, Id}};
-                false -> wait_for_result(Id)
+                true -> {ok, {continuous, JobId}};
+                false -> couch_replicator_jobs:wait_for_result(JobId)
             end
     end.
 
 
--spec start_replicate_job(#{}) -> ok.
-start_replicate_job(#{} = Rep) ->
-    RepJobData = #{
+-spec start_transient_job(binary(), #{}) -> ok.
+start_transient_job(JobId, #{} = Rep) ->
+    JobData = #{
         ?REP => Rep,
-        ?STATE => ?ST_PENDING,
+        ?REP_ID => null,
+        ?BASE_ID => null,
+        ?DB_NAME => null,
+        ?DB_UUID => null,
+        ?DOC_ID => null,
+        ?STATE => ?ST_INITIALIZING,
         ?STATE_INFO => null,
         ?ERROR_COUNT => 0,
         ?LAST_UPDATED => erlang:system_time(),
-        ?HISTORY => []
+        ?JOB_HISTORY => []
     },
     couch_jobs_fdb:tx(couch_jobs_fdb:get_jtx(Tx), fun(JTx) ->
-        case couch_jobs:get_job_data(JTx, ?REP_JOBS, RepID) of
+        case couch_replicator_jobs:get_job_data(JTx, JobId) of
             {ok, #{?REP := OldRep}} ->
                 case couch_replicator_utils:compare_rep_objects(Rep, OldRep) of
                     true ->
@@ -98,11 +98,10 @@ start_replicate_job(#{} = Rep) ->
                         % restarted.
                         ok;
                     false ->
-                        ok = couch_jobs:remove(JTx, ?REP_JOBS, RepID)
-                        ok = couch_jobs:add(JTx, ?REP_JOBS, RepId, JobData)
+                        couch_replicator_jobs:add_job(JTx, JobId, JobData)
                 end;
             {error, not_found} ->
-                ok = couch_jobs:add(JTx, ?REP_JOBS, RepID, JobData)
+                ok = couch_replicator_jobs:add_job(JTx, JobId, JobData)
         end
     end).
 
@@ -111,7 +110,6 @@ start_replicate_job(#{} = Rep) ->
 % it returns `ignore`.
 -spec ensure_rep_db_exists() -> ignore.
 ensure_rep_db_exists() ->
-    couch_jobs:set_type_timeout(?REP_DOCS, ?REP_DOCS_TIMEOUT_MSEC),
     case config:get_boolean("replicator", "create_replicator_db", false) of
         true ->
             ok = couch_replicator_docs:ensure_rep_db_exists();
@@ -121,45 +119,26 @@ ensure_rep_db_exists() ->
     ignore.
 
 
--spec wait_for_result(rep_id()) ->
-    {ok, {[_]}} | {error, any()}.
-wait_for_result(RepId) ->
-    FinishRes = case couch_jobs:subscribe(?REP_JOBS, RepId) of
-        {ok, finished, JobData} ->
-            {ok, JobData};
-        {ok, SubId, _, _} ->
-            case couch_jobs:wait(SubId, finished, infinity) of
-                {?REP_JOBS, RepId, finished, JobData} -> {ok, JobData};
-                timeout -> timeout
-            end;
-        {error, Error} ->
-            {error, Error}
-    end,
-    case FinishRes of
-       {ok, #{<<"finished_result">> := CheckpointHistory}} ->
-            {ok, CheckpointHistory};
-       timeout ->
-            {error, timeout};
-       {error, Error} ->
-            {error, Error}
-    end.
-
-
 -spec cancel_replication(rep_id()) ->
     {ok, {cancelled, binary()}} | {error, not_found}.
-cancel_replication(RepId) when is_binary(RepId) ->
-    couch_log:notice("Canceling replication '~s' ...", [RepId]),
-    case couch_jobs:get_job_data(undefined, ?REP_JOBS, RepId) of
-        {error_not, found} ->
-            {error, not_found};
-        #{?REP := #{?DB_NAME := null, ?DB_UUID := null}} ->
-            couch_jobs:remove(undefined, ?REP_JOBS, RepId)
-            {ok, {cancelled, ?l2b(FullRepId)}};
-        #{?REP := #{}} ->
-            % Job was started from a replicator doc canceling via _replicate
-            % doesn't quite make sense, instead replicator should be deleted.
-            {error, not_found}
-    end.
+cancel_replication(RepOrJobId) when is_binary(RepOrJobId) ->
+    couch_log:notice("Canceling replication '~s' ...", [RepOrJobId]),
+    couch_jobs_fdb:tx(couch_jobs_fdb:get_jtx(), fun(JTx) ->
+        #{tx := Tx, layer_prefix := LayerPrefix} = JTx,
+        Key = erlfdb_tuple:pack({?REPLICATION_IDS, RepOrJobId}, LayerPrefix),
+        JobId = case erlfdb:wait(erlfdb:get(Tx, Key)) of
+            not_found ->
+                RepOrJobId;
+            Id when is_binary(Id)->
+                Id
+        end,
+        case couch_replicator_job:remove_job(JTx, JobId) of
+            {error, not_found} ->
+                {error, not_found};
+            ok ->
+                {ok, {cancelled, RepOrJobId}}
+        end
+    ).
 
 
 -spec replication_states() -> [atom()].
