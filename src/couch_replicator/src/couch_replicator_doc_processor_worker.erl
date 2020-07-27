@@ -85,6 +85,7 @@ worker_fun(Id, Rep, WaitSec, WRef) ->
 % filter.
 maybe_start_replication(Id, RepWithoutId, WRef) ->
     Rep = couch_replicator_docs:update_rep_id(RepWithoutId),
+    {RepId, BaseId} = couch_replicator_ids:replication_id(RepWithoutId),
     case maybe_add_job_to_scheduler(Id, Rep, WRef) of
     ignore ->
         ignore;
