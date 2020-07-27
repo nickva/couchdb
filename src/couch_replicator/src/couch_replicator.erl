@@ -292,7 +292,7 @@ state_atom(State) when is_atom(State) ->
 
 -spec check_authorization(rep_id(), #user_ctx{}) -> ok | not_found.
 check_authorization(RepId, #user_ctx{name = Name} = Ctx) ->
-    case couch_jobs:get_job_data(undefined, ?REP_JOBS, RePid) of
+    case couch_replicator_jobs:get_job_data(undefined, RePid) of
         {error_not, found} ->
             not_found;
         #{?REP := {?REP_USER := Name}} ->

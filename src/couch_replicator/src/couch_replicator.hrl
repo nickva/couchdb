@@ -12,12 +12,6 @@
 
 -define(REP_ID_VERSION, 4).
 
-% Couch jobs types and timeouts
--define(REP_DOCS, <<"rep_docs">>).
--define(REP_JOBS, <<"rep_jobs">>).
--define(REP_DOCS_TIMEOUT_MSEC, 17000).
--define(REP_JOBS_TIMEOUT_MSEC, 33000).
-
 % Some fields from the replication doc
 -define(SOURCE, <<"source">>).
 -define(TARGET, <<"target">>).
@@ -71,7 +65,7 @@
 -define(DOC_ID, <<"doc_id">>).
 -define(ERROR_COUNT, <<"error_count">>).
 -define(LAST_UPDATED, <<"last_updated">>).
--define(HISTORY, <<"history">>).
+-define(JOB_HISTORY, <<"job_history">>).
 
 -define(REP_DB_NAME, <<"_replicator">>).
 
