@@ -22,7 +22,6 @@
     fold_jobs/4,
     pending_count/2,
     pending_count/3,
-    pending_count/4
 
     % Job processing
     accept/1,
