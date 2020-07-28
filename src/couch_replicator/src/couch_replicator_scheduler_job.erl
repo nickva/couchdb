@@ -101,8 +101,14 @@ accept() ->
     NowSec = erlang:system_time(second),
     MaxSchedTime = NowSec + accept_jitter() div 1000},
     case couch_replicator_jobs:accept(MaxSchedTime) of
-        {ok, Job, JobData} ->
-            couch_replicator_job_server:accepted(self()),
+        {ok, Job, #{?REP := Rep}} = JobData} ->
+            Normal = case Rep of
+                #{?OPTIONS := #{} = Options} ->
+                    not map:get(<<"continuous">>, Options, false);
+                _ ->
+                    true
+            end,
+            couch_replicator_job_server:accepted(self(), Normal),
             {ok, Job, JobData};
         {error, not_found} ->
             timer:sleep(accept_jitter()),
@@ -333,7 +339,7 @@ handle_info(timeout, accepting) ->
             % Shutdown state is a hack as it is not really the state of the
             % gen_server (it failed to initialize, so it doesn't have one).
             % Shutdown state is used to pass extra info about why start failed.
-            ShutdownState = {error, Class, StackTop2, InitArgs},
+            ShutdownState = {error, Class, StackTop2, _InitArgs = []},
             {stop, {shutdown, ShutdownReason}, ShutdownState}
     end.
 

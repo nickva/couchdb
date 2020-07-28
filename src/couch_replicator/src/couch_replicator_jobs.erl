@@ -97,7 +97,8 @@ fold_jobs(Tx, UserFun, Acc) when is_function(UserFun, 4) ->
 
 
 pending_count(Tx) ->
-    couch_jobs:pending_count(Tx, ?REP_JOBS).
+    MaxSchedTime = erlang:system_time(second),
+    pending_count(Tx, MaxSchedTime).
 
 
 pending_count(Tx, MaxSchedTime) when is_integer(MaxSchedTime) ->
