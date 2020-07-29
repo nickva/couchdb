@@ -119,29 +119,13 @@ process_change(#{} = Db, #doc{deleted = false} = Doc) ->
             {null, couch_replicator_utils:rep_error_to_binary(Reason)}
     end,
     JobId = couch_replicator_ids:job_id(DbUUID, DocId),
-    JobData0 = #{
-        ?REP => Rep,
-        ?REP_ID => null,
-        ?BASE_ID => null,
-        ?DB_NAME => DbName,
-        ?DB_UUID => DbUUID,
-        ?DOC_ID => DocId,
-        ?ERROR_COUNT => 0,
-        ?REP_STATS => #{},
-        ?LAST_UPDATED => erlang:system_time(),
-        ?JOB_HISTORY => []
-    },
     JobData = case Rep of
         null ->
-            JobData0#{
-                ?STATE => ?ST_FAILED,
-                ?STATE_INFO => Error
-            };
+            couch_relicator_jobs:new_job(Rep. DbName, DbUUID, DocId,
+                ?ST_FAILED, Error);
         #{} ->
-            JobData0#{
-                ?STATE => ?ST_INITIALIZING,
-                ?STATE_INFO => null
-            }
+            couch_replicator_jobs:new_job(Rep, DbName, DbUUID, DocId,
+                ?ST_INITIALIZING, null)
     end,
     couch_jobs_fdb:tx(couch_jobs_fdb:get_jtx(Db), fun(JTx) ->
         couch_replicate_jobs:get_job_data(JTx, JobId) of

@@ -94,14 +94,14 @@ start_link() ->
 
 init(_) ->
     process_flag(trap_exit, true),
-    {ok, accepting, 0}.
+    {ok, delay_init, 0}.
 
 
 accept() ->
     NowSec = erlang:system_time(second),
     MaxSchedTime = NowSec + accept_jitter() div 1000},
     case couch_replicator_jobs:accept(MaxSchedTime) of
-        {ok, Job, #{?REP := Rep}} = JobData} ->
+        {ok, Job, #{?REP := Rep} = JobData} ->
             Normal = case Rep of
                 #{?OPTIONS := #{} = Options} ->
                     not map:get(<<"continuous">>, Options, false);
@@ -116,15 +116,23 @@ accept() ->
     end.
 
 
-do_init() ->
+delayed_init() ->
     couch_log:debug("~p : starting acceptor ", [?MODULE]),
 
-    {ok, Job, JobData} = accept(),
+    {ok, Job0, JobData0} = accept(),
 
     couch_log:debug("~p : accepted job ~p, initializing", [?MODULE, Job]),
 
-    timer:sleep(startup_jitter()),
+    check_for_permanent_failure(Job0, JobData0),
 
+    remove_old_state_fields(JobData0),
+
+    {ok, Job1, JobData1} = update_replication_id(Job0, JobData0),
+    
+    {?REP := Rep} = JobData0,
+
+    maybe
+    {ok, Job1, JobData1} = calculate_
     #rep_state{
         source = Source,
         target = Target,
@@ -192,6 +200,106 @@ do_init() ->
             workers = Workers
         }
     }.
+
+
+check_for_permanent_failure(Job, #{} = JobData) ->
+    case JobData of
+        #{?REP := null, ?STATE := ?ST_FAILED, ?STATE_INFO := Error} ->
+            ok = fail_job(Job, JobData),
+            throw(finished);
+        #{?REP := #{}} ->
+            ok
+    end.
+
+
+remove_old_state_fields(#{?DOC_STATE := DocState} = JobData) when
+        DocState =:= ?TRIGGERED orelse DocState =:= ?ERROR ->
+    case update_docs() of
+        true ->
+            ok;
+        false ->
+            #{?REP := Rep, ?DB_NAME := DbName, ?DOC_ID := DocId} = JobData,
+            case is_binary(DbName) andalso is_binary(DocId) of
+                true ->
+                    couch_replicator_docs:remove_state_fields(DbName, DocId);
+                false ->
+                    ok
+            end
+    end;
+
+remove_old_state_fields(#{}) ->
+    ok.
+
+
+update_replication_id(Job, #{} = JobData) ->
+    #{?REP := Rep} = JobData,
+    {NewRepId, NewBaseId} = try
+        couch_replicator_ids:replication_id(Rep),
+    catch
+        throw:{filter_fetch_error, Error} ->
+            Error1 = io_lib:format("Filter fetch error ~p", [Error]),
+            Error2 = couch_util:to_binary(Error1),
+            #{?REP_ID := RepId, ?DB_NAME := DbName, ?DOC_ID := DocId} = JobData,
+            maybe_update_doc_error(RepId, DbName, DocId, Error2),
+            reschedule_on_error(Job, JobData, Error2),
+            throw(finished)
+    end,
+    % compare old and new use update_replication_id
+
+
+reschedule_on_error(Job, JobData, Error) ->
+    #{?ERROR_COUNT := ErrorCount} = JobData,
+    ErrorCount1 = ErrorCount + 1,
+    JobData1 = JobData#{
+        ?STATE := ?ST_ERROR,
+        ?STATE_INFO := Error,
+        ?ERROR_COUNT := ErrorCount1,
+    } = JobData,
+    Time = get_backoff_time(ErrorCount1),
+    case couch_replicator_job:reschedule_job(undefined, Job, JobData, Time) of
+        ok -> ok;
+        {error, halt} -> throw(halt)
+    end.
+
+
+fail_job(Job, JobData, Error) ->
+    #{?ERROR_COUNT := ErrorCount} = JobData,
+    JobData1 = JobData#{
+        ?STATE := ?ST_FAILED,
+        ?STATE_INFO := Error,
+        ?ERROR_COUNT := ErrorCount + 1,
+    } = JobData,
+    case couch_replicator_jobs:finish_job(undefined, Job, JobData1) of
+        ok -> ok;
+        {error, halt} -> throw(halt)
+    end.
+
+
+get_backoff_time(ErrorCount) ->
+    Exp = min(ErrCnt, ?ERROR_MAX_BACKOFF_EXPONENT),
+    % ErrCnt is the exponent here. The reason 64 is used is to start at
+    % 64 (about a minute) max range. Then first backoff would be 30 sec
+    % on average. Then 1 minute and so on.
+    NowSec = erlang:system_time(second),
+    NowSec + rand:uniform(?INITIAL_BACKOFF_EXPONENT bsl Exp).
+
+
+maybe_update_doc_error(RepId, DbName, DocId, Error) ->
+    case update_docs() of
+        true when is_binary(DbName), is_binary(DocId) ->
+            couch_replicator_docs:update_error(RepId, DbName, DocId, Error);
+        _ ->
+            ok
+    end.
+
+
+maybe_update_doc_triggered(RepId, DbName, DocId) ->
+    case update_docs() of
+        true when is_binary(DbName), is_binary(DocId) ->
+            couch_replicator_docs:update_triggered(RepId, DbName, DocId);
+        _ ->
+            ok
+    end.
 
 
 handle_call({add_stats, Stats}, From, State) ->
@@ -326,13 +434,17 @@ handle_info({'EXIT', Pid, Reason}, #rep_state{workers = Workers} = State) ->
         {stop, StopReason, State2}
     end;
 
-handle_info(timeout, accepting) ->
-    try do_init() of
+handle_info(timeout, delayed_init) ->
+    try delayed_init() of
         {ok, State} ->
             {noreply, State}
     catch
         exit:{http_request_failed, _, _, max_backoff} ->
             {stop, {shutdown, max_backoff}, {error, max_backoff}};
+        throw:finished ->
+            {stop, {shutdown, finished}, finished};
+        throw:halt ->
+            {stop, {shutdown, halt}, halt};
         Class:Error ->
             ShutdownReason = {error, replication_start_error(Error)},
             StackTop2 = lists:sublist(erlang:get_stacktrace(), 2),
@@ -362,6 +474,14 @@ terminate(shutdown, #rep_state{id = RepId} = State) ->
             State
     end,    finish_couch_job(State1, ?ST_PENDING, null),
     terminate_cleanup(State1);
+
+terminate({shutdown, finished}, finished) ->
+    couch_log:notice("~p : Job finished in init", [?MODULE]),
+    ok;
+
+terminate({shutdown, halt}, halt) ->
+    couch_log:error("~p : Replication job halted", [?MODULE]),
+    ok;
 
 terminate({shutdown, max_backoff}, {error, {#{} = Job, #{} = JobData}}) ->
     % Here we handle the case when replication fails during initialization.
@@ -451,16 +571,14 @@ format_status(_Opt, [_PDict, State]) ->
     ].
 
 
-startup_jitter() ->
-    Jitter = config:get_integer("replicator", "startup_jitter",
-        ?STARTUP_JITTER_DEFAULT),
-    couch_rand:uniform(erlang:max(1, Jitter)).
-
-
 accept_jitter() ->
     Jitter = config:get_integer("replicator", "accept_jitter",
         ?ACCEPT_JITTER_DEFAULT),
     couch_rand:uniform(erlang:max(1, Jitter)).
+
+
+update_docs() ->
+    config:get_boolean("replicator", "update_docs", ?DEFAULT_UPDATE_DOCS).
 
 
 headers_strip_creds([], Acc) ->

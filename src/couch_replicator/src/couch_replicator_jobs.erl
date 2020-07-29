@@ -14,6 +14,10 @@
 
 
 -export([
+    set_couch_jobs_timeout/0,
+
+    new_job/5,
+
     add_job/3,
     remove_job/2,
     get_job_data/2,
@@ -59,6 +63,24 @@
 
 set_couch_jobs_timeout() ->
     couch_jobs:set_type_timeout(?REP_JOBS, ?REP_JOBS_TIMEOUT_MSEC).
+
+
+new_job(#{} = Rep, DbName, DbUUID, DocId, State, StateInfo) ->
+    #{
+        ?REP => Rep,
+        ?REP_ID => null,
+        ?BASE_ID => null,
+        ?DB_NAME => DbName,
+        ?DB_UUID => DbUUID,
+        ?DOC_ID => DocId,
+        ?ERROR_COUNT => 0,
+        ?REP_STATS => #{},
+        ?STATE => State,
+        ?STATE_INFO => StateInfo,
+        ?LAST_UPDATED => erlang:system_time(),
+        ?LAST_FILTER_CHECK => 0,
+        ?JOB_HISTORY => []
+    }.
 
 
 add_job(Tx, JobId, JobData) ->

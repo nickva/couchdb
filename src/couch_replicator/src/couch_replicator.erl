@@ -73,19 +73,8 @@ replicate(PostBody, #user_ctx{name = UserName}) ->
 
 -spec start_transient_job(binary(), #{}) -> ok.
 start_transient_job(JobId, #{} = Rep) ->
-    JobData = #{
-        ?REP => Rep,
-        ?REP_ID => null,
-        ?BASE_ID => null,
-        ?DB_NAME => null,
-        ?DB_UUID => null,
-        ?DOC_ID => null,
-        ?STATE => ?ST_INITIALIZING,
-        ?STATE_INFO => null,
-        ?ERROR_COUNT => 0,
-        ?LAST_UPDATED => erlang:system_time(),
-        ?JOB_HISTORY => []
-    },
+    JobData = couch_replicator_jobs:new_job(Rep, null, null, null,
+        ?ST_INITIALIZING, null),
     couch_jobs_fdb:tx(couch_jobs_fdb:get_jtx(Tx), fun(JTx) ->
         case couch_replicator_jobs:get_job_data(JTx, JobId) of
             {ok, #{?REP := OldRep}} ->
