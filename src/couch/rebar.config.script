@@ -69,6 +69,8 @@ SMVsn = case lists:keyfind(spidermonkey_version, 1, CouchConfig) of
         "86";
     {_, "91"} ->
         "91";
+    {_, "quickjs"} ->
+        "quickjs";
     undefined ->
         "91";
     {_, Unsupported} ->
@@ -118,6 +120,11 @@ end.
 % considered in the `configure` script as a pre-check for their existence.
 % Please keep them in sync.
 {JS_CFLAGS, JS_LDFLAGS} = case os:type() of
+     {unix, _} when SMVsn == "quickjs" ->
+        {
+            "-g -flto -Wall -MMD -Wno-array-bounds -Wno-format-truncation -D_GNU_SOURCE -DCONFIG_BIGNUM=0 -O2 -DCONFIG_VERSION=\\\"quickjs\\\" -Ipriv/couch_js/quickjs/quickjs",
+            "-lm -flto"
+        };
     {win32, _} when SMVsn == "1.8.5" ->
         {
             "/DXP_WIN",
@@ -170,7 +177,18 @@ end.
         }
 end.
 
+QuickJSSrcs = [
+  "cutils.c",
+  "libbf.c",
+  "libregexp.c",
+  "libunicode.c",
+  "quickjs-libc.c",
+  "quickjs.c"
+].
+QuickJSSrcs1 = ["priv/couch_js/quickjs/quickjs/" ++ S || S <- QuickJSSrcs],
+
 CouchJSSrc = case SMVsn of
+    "quickjs" -> ["priv/couch_js/quickjs/*.c" | QuickJSSrcs1];
     "1.8.5" -> ["priv/couch_js/1.8.5/*.c"];
     "60" -> ["priv/couch_js/60/*.cpp"];
     "68" -> ["priv/couch_js/68/*.cpp"];
@@ -180,6 +198,11 @@ CouchJSSrc = case SMVsn of
 end.
 
 CouchJSEnv = case SMVsn of
+     "quickjs" ->
+        [
+            {"CFLAGS", JS_CFLAGS},
+            {"LDFLAGS", JS_LDFLAGS}
+        ];
     "1.8.5" ->
         [
             {"CFLAGS", JS_CFLAGS},

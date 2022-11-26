@@ -1,0 +1,13 @@
+diff --git a/src/couch/priv/couch_js/quickjs/quickjs/quickjs-libc.c b/src/couch/priv/couch_js/quickjs/quickjs/quickjs-libc.c
+index e180dd0cd..f8c2945a3 100644
+--- a/src/couch/priv/couch_js/quickjs/quickjs/quickjs-libc.c
++++ b/src/couch/priv/couch_js/quickjs/quickjs/quickjs-libc.c
+@@ -59,7 +59,7 @@ typedef sig_t sighandler_t;
+ 
+ #if !defined(_WIN32)
+ /* enable the os.Worker API. IT relies on POSIX threads */
+-#define USE_WORKER
++// #define USE_WORKER
+ #endif
+ 
+ #ifdef USE_WORKER
