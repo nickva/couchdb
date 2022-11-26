@@ -33,7 +33,7 @@ main([]) ->
         undefined -> "1.8.5"
     end,
 
-    JsFiles =  [
+    JsFiles0 =  [
         "share/server/dreyfus.js",
         "share/server/filter.js",
         "share/server/mimeparse.js",
@@ -41,25 +41,29 @@ main([]) ->
         "share/server/state.js",
         "share/server/util.js",
         "share/server/validate.js",
-        "share/server/views.js",
-        "share/server/loop.js"
+        "share/server/views.js"
     ],
 
-    CoffeeFiles = [
-        "share/server/dreyfus.js",
-        "share/server/filter.js",
-        "share/server/mimeparse.js",
-        "share/server/render.js",
-        "share/server/state.js",
-        "share/server/util.js",
-        "share/server/validate.js",
-        "share/server/views.js",
-        "share/server/coffee-script.js",
-        "share/server/loop.js"
-    ],
+    JsFiles = case SMVsn of
+        "quickjs" ->
+            JsFiles0 ++ ["share/server/dispatch-quickjs.js"];
+        _ ->
+            JsFiles0 ++ ["share/server/loop.js"]
+    end,
+
+    CoffeeFiles = case SMVsn of
+        "quickjs" ->
+            JsFiles0 ++ ["share/server/coffee-script.js", "share/server/dispatch-quickjs.js"];
+        _ ->
+            JsFiles0 ++ ["share/server/coffee-script.js", "share/server/loop.js"]
+    end,
 
     ExtraFiles = case SMVsn of
         "1.8.5" ->
+            [
+                "share/server/rewrite_fun.js"
+            ];
+        "quickjs" ->
             [
                 "share/server/rewrite_fun.js"
             ];
@@ -86,7 +90,7 @@ main([]) ->
     end,
 
     case SMVsn of
-        "1.8.5" ->
+        V when V == "1.8.5" orelse V == "quickjs" ->
             ok = Concat(ExtraFiles ++ JsFiles, "share/server/main.js"),
             ok = Concat(ExtraFiles ++ JsFiles, "share/server/main-ast-bypass.js");
         _ ->

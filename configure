@@ -246,6 +246,7 @@ if [ "${ERLANG_OS}" = "unix" ]; then
     # This list is taken from src/couch/rebar.config.script, please keep them in sync.
     if [ ! -d "/usr/include/${SM_HEADERS}" ] && \
         [ ! -d "/usr/local/include/${SM_HEADERS}" ] && \
+        [ ! -d "src/couch/priv/couch_js/quickjs/quickjs" ] && \
         [ ! -d "/opt/homebrew/include/${SM_HEADERS}" ]; then
         echo "ERROR: SpiderMonkey ${SM_VSN} is not found. Please specify with --spidermonkey-version."
         exit 1

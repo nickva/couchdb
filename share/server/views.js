@@ -73,8 +73,13 @@ var Views = (function() {
       // Throwing errors of the form ["fatal","error_key","reason"]
       // will kill the OS process. This is not normally what you want.
       throw(err);
+    } else if (err.name == "InternalError" && err.message == "out of memory") {
+      // Some engines like QuickJS throw an internal error when hitting a memory
+      // limit. For compatibiliy choose to mimic Sidermonkey behavior and hard
+      // crash.
+      throw(["fatal", err.name, err.message]);
     }
-    var message = "function raised exception " + err.toSource();
+    var message = "function raised exception " + errstr(err);
     if (doc) message += " with doc._id " + doc._id;
     log(message);
   };
