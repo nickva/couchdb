@@ -105,6 +105,7 @@ init([]) ->
     ets:insert(?SERVERS, get_servers_from_env("COUCHDB_NATIVE_QUERY_SERVER_")),
     ets:insert(?SERVERS, [{"QUERY", {mango_native_proc, start_link, []}}]),
     maybe_configure_erlang_native_servers(),
+    maybe_configure_lua_servers(),
 
     {ok, #state{
         config = get_proc_config(),
@@ -204,6 +205,7 @@ handle_cast(reload_config, State) ->
         soft_limit = get_soft_limit()
     },
     maybe_configure_erlang_native_servers(),
+    maybe_configure_lua_servers(),
     {noreply, flush_waiters(NewState)};
 handle_cast(_Msg, State) ->
     {noreply, State}.
@@ -411,6 +413,15 @@ maybe_configure_erlang_native_servers() ->
                 {"ERLANG", {couch_native_process, start_link, []}}
             ]);
         _Else ->
+            ok
+    end.
+
+maybe_configure_lua_servers() ->
+    case config:get_boolean("native_query_servers", "enable_lua_query_server", true) of
+        true ->
+            MFA = {couch_lua_process, start_link, []},
+            ets:insert(?SERVERS, [{"LUA", MFA}]);
+        false ->
             ok
     end.
 
