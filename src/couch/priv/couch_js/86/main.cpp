@@ -33,6 +33,8 @@
 #include "config.h"
 #include "util.h"
 
+#include <time.h>
+
 static bool enableSharedMemory = true;
 static bool enableToSource = true;
 
@@ -256,7 +258,7 @@ static JSSecurityCallbacks security_callbacks = {
     nullptr
 };
 
-int runWithContext(JSContext* cx, couch_args* args) {
+int runWithContext(JSContext* cx) {
     JS_SetGlobalJitCompilerOption(cx, JSJITCOMPILER_BASELINE_ENABLE, 0);
     JS_SetGlobalJitCompilerOption(cx, JSJITCOMPILER_ION_ENABLE, 0);
 
@@ -265,80 +267,37 @@ int runWithContext(JSContext* cx, couch_args* args) {
 
     JS::SetWarningReporter(cx, couch_error);
     JS::SetOutOfMemoryCallback(cx, couch_oom, NULL);
-    JS_SetContextPrivate(cx, args);
     JS_SetSecurityCallbacks(cx, &security_callbacks);
 
-    JS::RealmOptions options;
-    // we need this in the query server error handling
-    options.creationOptions().setToSourceEnabled(enableToSource);
-    JS::RootedObject global(cx, JS_NewGlobalObject(cx, &global_class, nullptr,
-                                                   JS::FireOnNewGlobalHook, options));
-    if (!global)
-        return 1;
-
-    JSAutoRealm ar(cx, global);
-
-    if(!JS::InitRealmStandardClasses(cx))
-        return 1;
-
-    if(couch_load_funcs(cx, global, global_functions) != true)
-        return 1;
-
-    for(int i = 0 ; args->scripts[i] ; i++) {
-        const char* filename = args->scripts[i];
-
-        // Compile and run
-        JS::CompileOptions options(cx);
-        JS::RootedScript script(cx);
-
-        script = JS::CompileUtf8Path(cx, options, filename);
-        if (!script) {
-            JS::RootedValue exc(cx);
-            if(!JS_GetPendingException(cx, &exc)) {
-                fprintf(stderr, "Failed to compile file: %s\n", filename);
-            } else {
-                JS::RootedObject exc_obj(cx, &exc.toObject());
-                JSErrorReport* report = JS_ErrorFromException(cx, exc_obj);
-                couch_error(cx, report);
-            }
-            return 1;
-        }
-
-        JS::RootedValue result(cx);
-        if(JS_ExecuteScript(cx, script, &result) != true) {
-            JS::RootedValue exc(cx);
-            if(!JS_GetPendingException(cx, &exc)) {
-                fprintf(stderr, "Failed to execute script.\n");
-            } else {
-                JS::RootedObject exc_obj(cx, &exc.toObject());
-                JSErrorReport* report = JS_ErrorFromException(cx, exc_obj);
-                couch_error(cx, report);
-            }
-        }
-
-        // Give the GC a chance to run.
-        JS_MaybeGC(cx);
-    }
     return 0;
 }
 
 int
 main(int argc, const char* argv[])
 {
-    JSContext* cx = NULL;
-    int ret;
+    clock_t t0, t1, t2;
 
-    couch_args* args = couch_parse_args(argc, argv);
+    t0 = clock();
+
+    JSContext* cx = NULL;
 
     JS_Init();
-    cx = JS_NewContext(args->stack_size);
+
+    cx = JS_NewContext(64L * 1024L * 1024L);
     if(cx == NULL) {
         JS_ShutDown();
         return 1;
     }
-    ret = runWithContext(cx, args);
+
+    t1 = clock();
+
     JS_DestroyContext(cx);
     JS_ShutDown();
 
-    return ret;
+    t2 = clock();
+
+    printf("\nInit (usec): \t%f\n", (double)(t1 - t0) * 1e6 / CLOCKS_PER_SEC);
+    printf("Free (usec): \t%f\n",   (double)(t2 - t1) * 1e6 / CLOCKS_PER_SEC);
+
+    return 0;
 }
